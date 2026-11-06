@@ -1,0 +1,25 @@
+@baseUrl = http://localhost:5080
+
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Fotoğraf analizi için curl örneği (PowerShell'de curl.exe kullan)
+# curl.exe -X POST "http://localhost:5080/api/analyze" -F "category=top" -F "photo=@C:\temp\gomlek.jpg;type=image/jpeg"
+
+### Fotoğraf içermeyen kombin isteği
+POST {{baseUrl}}/api/outfits
+Content-Type: application/json
+
+{
+  "preferences": {
+    "destination": "Arkadaş buluşması",
+    "look": "Smart casual",
+    "tone": "Koyu"
+  },
+  "wardrobe": [
+    { "id": "t1", "category": "top", "name": "Lacivert gömlek", "subType": "gömlek", "primaryColor": "lacivert", "secondaryColors": [], "pattern": "düz", "styleTags": ["smart casual"], "seasons": ["dört mevsim"], "description": "" },
+    { "id": "b1", "category": "bottom", "name": "Bej chino", "subType": "chino", "primaryColor": "bej", "secondaryColors": [], "pattern": "düz", "styleTags": ["smart casual"], "seasons": ["dört mevsim"], "description": "" },
+    { "id": "s1", "category": "shoes", "name": "Beyaz sneaker", "subType": "sneaker", "primaryColor": "beyaz", "secondaryColors": [], "pattern": "düz", "styleTags": ["rahat"], "seasons": ["dört mevsim"], "description": "" }
+  ]
+}
+

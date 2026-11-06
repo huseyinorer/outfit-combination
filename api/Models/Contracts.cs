@@ -1,0 +1,70 @@
+namespace OutfitCombination.Api.Models;
+
+public static class Categories
+{
+    public const string Top = "top";
+    public const string Bottom = "bottom";
+    public const string Shoes = "shoes";
+    public static readonly string[] All = [Top, Bottom, Shoes];
+}
+
+public sealed class ClothingAnalysis
+{
+    public string Name { get; set; } = "";
+    public string SubType { get; set; } = "";
+    public string PrimaryColor { get; set; } = "";
+    public List<string> SecondaryColors { get; set; } = [];
+    public string Pattern { get; set; } = "";
+    public List<string> StyleTags { get; set; } = [];
+    public List<string> Seasons { get; set; } = [];
+    public string Description { get; set; } = "";
+    public string? DetectedCategory { get; set; }
+    public bool CategoryConflict { get; set; }
+}
+
+public sealed class OutfitPreferences
+{
+    public string Destination { get; set; } = "Fark etmez";
+    public string Look { get; set; } = "Fark etmez";
+    public string Tone { get; set; } = "Fark etmez";
+}
+
+public sealed class WardrobeItem
+{
+    public string Id { get; set; } = "";
+    public string Category { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string SubType { get; set; } = "";
+    public string PrimaryColor { get; set; } = "";
+    public List<string> SecondaryColors { get; set; } = [];
+    public string Pattern { get; set; } = "";
+    public List<string> StyleTags { get; set; } = [];
+    public List<string> Seasons { get; set; } = [];
+    public string Description { get; set; } = "";
+}
+
+public sealed class OutfitRequest
+{
+    public OutfitPreferences Preferences { get; set; } = new();
+    public List<WardrobeItem> Wardrobe { get; set; } = [];
+}
+
+public sealed class OutfitSuggestion
+{
+    public string Title { get; set; } = "";
+    public string TopId { get; set; } = "";
+    public string BottomId { get; set; } = "";
+    public string ShoeId { get; set; } = "";
+    public string Reason { get; set; } = "";
+}
+
+public sealed class OutfitAiEnvelope
+{
+    public List<OutfitSuggestion> Suggestions { get; set; } = [];
+}
+
+public sealed record OutfitResponse(
+    IReadOnlyList<OutfitSuggestion> Suggestions,
+    bool UsedFallback,
+    string? Warning = null);
+

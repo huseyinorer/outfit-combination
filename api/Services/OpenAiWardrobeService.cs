@@ -1,0 +1,230 @@
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using OutfitCombination.Api.Models;
+
+namespace OutfitCombination.Api.Services;
+
+public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAiOptions> options)
+{
+    private readonly OpenAiOptions _options = options.Value;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public int MaxAttempts => Math.Clamp(_options.MaxAttempts, 1, 3);
+
+    public async Task<ClothingAnalysis> AnalyzeAsync(
+        Stream image,
+        string contentType,
+        string selectedCategory,
+        CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+        using var memory = new MemoryStream();
+        await image.CopyToAsync(memory, cancellationToken);
+        var dataUrl = $"data:{contentType};base64,{Convert.ToBase64String(memory.ToArray())}";
+
+        var body = new
+        {
+            model = _options.Model,
+            store = false,
+            instructions = "Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Yalnızca açıkça görülen özellikleri yaz, tahmin edilemeyen metin alanlarını boş string ve listeleri boş dizi bırak. Tüm serbest metinleri Türkçe yaz. detectedCategory yalnız top, bottom, shoes veya boş string olabilir.",
+            input = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = $"Kullanıcının seçtiği kategori: {selectedCategory}. Kıyafeti analiz et." },
+                        new { type = "input_image", image_url = dataUrl, detail = "high" }
+                    }
+                }
+            },
+            text = new
+            {
+                format = new
+                {
+                    type = "json_schema",
+                    name = "clothing_analysis",
+                    strict = true,
+                    schema = AnalysisSchema()
+                }
+            }
+        };
+
+        var json = await SendAsync(body, cancellationToken);
+        var result = JsonSerializer.Deserialize<ClothingAnalysis>(json, JsonOptions)
+            ?? throw new AiServiceException("AI boş analiz döndürdü.");
+        result.DetectedCategory = string.IsNullOrWhiteSpace(result.DetectedCategory) ? null : result.DetectedCategory;
+        result.CategoryConflict = result.DetectedCategory is not null &&
+            !result.DetectedCategory.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase);
+        return result;
+    }
+
+    public async Task<IReadOnlyList<OutfitSuggestion>> SuggestAsync(
+        OutfitRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+        var safeInput = new
+        {
+            preferences = request.Preferences,
+            wardrobe = request.Wardrobe.Select(x => new
+            {
+                x.Id,
+                x.Category,
+                x.Name,
+                x.SubType,
+                x.PrimaryColor,
+                x.SecondaryColors,
+                x.Pattern,
+                x.StyleTags,
+                x.Seasons,
+                x.Description
+            })
+        };
+
+        var body = new
+        {
+            model = _options.Model,
+            store = false,
+            instructions = "Türkçe bir kişisel stil asistanısın. Yalnızca verilen kıyafet ID'lerini kullan. Her öneride tam olarak bir top, bir bottom ve bir shoes seç. Aynı üçlüyü tekrarlama. reason tek Türkçe cümle olsun ve seçilen parçaların renk, desen veya tarzına somut biçimde değinsin. Mümkünse görsel olarak farklı üç öneri üret.",
+            input = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = JsonSerializer.Serialize(safeInput, JsonOptions) }
+                    }
+                }
+            },
+            text = new
+            {
+                format = new
+                {
+                    type = "json_schema",
+                    name = "outfit_suggestions",
+                    strict = true,
+                    schema = OutfitSchema()
+                }
+            }
+        };
+
+        var json = await SendAsync(body, cancellationToken);
+        var envelope = JsonSerializer.Deserialize<OutfitAiEnvelope>(json, JsonOptions)
+            ?? throw new AiServiceException("AI boş kombin yanıtı döndürdü.");
+        return envelope.Suggestions;
+    }
+
+    private async Task<string> SendAsync(object body, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_options.BaseUrl.TrimEnd('/')}/responses");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey());
+        request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
+
+        try
+        {
+            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = responseJson.Length > 600 ? responseJson[..600] : responseJson;
+                throw new AiServiceException($"OpenAI API {(int)response.StatusCode}: {detail}");
+            }
+            return ExtractOutputText(responseJson);
+        }
+        catch (AiServiceException)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            throw new AiServiceException("OpenAI servisine ulaşılamadı veya yanıt okunamadı.", error);
+        }
+    }
+
+    private static string ExtractOutputText(string responseJson)
+    {
+        using var document = JsonDocument.Parse(responseJson);
+        if (!document.RootElement.TryGetProperty("output", out var output))
+            throw new AiServiceException("OpenAI yanıtında output alanı yok.");
+
+        foreach (var item in output.EnumerateArray())
+        {
+            if (!item.TryGetProperty("type", out var type) || type.GetString() != "message" ||
+                !item.TryGetProperty("content", out var content)) continue;
+            foreach (var part in content.EnumerateArray())
+            {
+                if (part.TryGetProperty("type", out var partType) && partType.GetString() == "output_text" &&
+                    part.TryGetProperty("text", out var text)) return text.GetString() ?? "";
+            }
+        }
+        throw new AiServiceException("OpenAI yanıtında yapılandırılmış metin bulunamadı.");
+    }
+
+    private string ApiKey() => !string.IsNullOrWhiteSpace(_options.ApiKey)
+        ? _options.ApiKey
+        : Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "";
+
+    private void EnsureConfigured()
+    {
+        if (string.IsNullOrWhiteSpace(ApiKey()))
+            throw new AiServiceException("OPENAI_API_KEY veya OpenAI__ApiKey ayarlanmamış.");
+        if (string.IsNullOrWhiteSpace(_options.Model))
+            throw new AiServiceException("OpenAI__Model ayarlanmamış.");
+    }
+
+    private static object AnalysisSchema() => new
+    {
+        type = "object",
+        additionalProperties = false,
+        properties = new
+        {
+            name = new { type = "string" },
+            subType = new { type = "string" },
+            primaryColor = new { type = "string" },
+            secondaryColors = new { type = "array", items = new { type = "string" } },
+            pattern = new { type = "string" },
+            styleTags = new { type = "array", items = new { type = "string" } },
+            seasons = new { type = "array", items = new { type = "string" } },
+            description = new { type = "string" },
+            detectedCategory = new { type = "string", @enum = new[] { "top", "bottom", "shoes", "" } },
+            categoryConflict = new { type = "boolean" }
+        },
+        required = new[] { "name", "subType", "primaryColor", "secondaryColors", "pattern", "styleTags", "seasons", "description", "detectedCategory", "categoryConflict" }
+    };
+
+    private static object OutfitSchema() => new
+    {
+        type = "object",
+        additionalProperties = false,
+        properties = new
+        {
+            suggestions = new
+            {
+                type = "array",
+                minItems = 0,
+                maxItems = 5,
+                items = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new
+                    {
+                        title = new { type = "string" },
+                        topId = new { type = "string" },
+                        bottomId = new { type = "string" },
+                        shoeId = new { type = "string" },
+                        reason = new { type = "string" }
+                    },
+                    required = new[] { "title", "topId", "bottomId", "shoeId", "reason" }
+                }
+            }
+        },
+        required = new[] { "suggestions" }
+    };
+}
+

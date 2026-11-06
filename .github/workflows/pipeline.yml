@@ -1,0 +1,119 @@
+name: Test, publish and release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: outfit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-checks:
+    name: Mobile checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - run: npm run check:version
+      - run: npm run typecheck
+      - run: npm test
+
+  backend-checks:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj
+      - run: dotnet build api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj -c Release --no-restore
+      - run: dotnet run --project api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj -c Release --no-build
+
+  publish-ota:
+    name: Publish Expo OTA update
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    needs: [mobile-checks, backend-checks]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Publish production update
+        run: eas update --channel production --environment production --non-interactive --message "main@${GITHUB_SHA::7}"
+
+  release-apk:
+    name: Build APK when app version changes
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    needs: [mobile-checks, backend-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Check whether this version already has a release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./mobile/app-version.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install mobile dependencies
+        if: steps.release.outputs.exists == 'false'
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+      - uses: expo/expo-github-action@v9
+        if: steps.release.outputs.exists == 'false'
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build directly installable APK
+        if: steps.release.outputs.exists == 'false'
+        working-directory: mobile
+        run: eas build --platform android --profile preview --non-interactive --wait --json > eas-build.json
+      - name: Download and publish APK release
+        if: steps.release.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          APK_URL=$(jq -r '.[0].artifacts.buildUrl' mobile/eas-build.json)
+          test -n "$APK_URL" && test "$APK_URL" != "null"
+          curl --fail --location "$APK_URL" --output outfit-combination.apk
+          gh release create "v$VERSION" outfit-combination.apk --title "Outfit Combination v$VERSION" --generate-notes

@@ -1,0 +1,26 @@
+# Dependencies are restored by npm/EAS and must never be committed.
+node_modules/
+
+# Expo-generated local state
+.expo/
+dist/
+web-build/
+android/
+ios/
+
+# Local secrets and machine-specific settings
+.env
+.env.*
+!.env.example
+
+# Signing files
+*.jks
+*.keystore
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+node_modules

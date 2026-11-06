@@ -1,0 +1,32 @@
+# JavaScript / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/android/
+mobile/ios/
+mobile/.git-empty-backup/
+
+# .NET
+api/bin/
+api/obj/
+api/**/bin/
+api/**/obj/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.jks
+*.keystore
+
+# IDE / operating system
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.docker-codex/

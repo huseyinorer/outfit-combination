@@ -1,0 +1,12 @@
+.git
+.github
+**/bin
+**/obj
+mobile/node_modules
+mobile/.expo
+mobile/android
+mobile/ios
+*.jks
+*.keystore
+.env
+.env.*

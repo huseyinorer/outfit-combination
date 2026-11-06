@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: outfit-combination-api
+    runtime: docker
+    region: frankfurt
+    plan: 0.5c-512mb
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OpenAI__Model
+        value: gpt-5.4-mini
+      - key: MobileUpdate__MinimumVersion
+        value: 1.0.0
+      - key: MobileUpdate__ForceLatest
+        value: "true"
+      - key: MobileUpdate__AndroidDownloadUrl
+        sync: false

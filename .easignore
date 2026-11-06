@@ -1,0 +1,18 @@
+# This root-level file is used by EAS for the monorepo build context.
+.git/
+.github/
+api/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/android/
+mobile/ios/
+
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+.DS_Store
+Thumbs.db

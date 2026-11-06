@@ -1,0 +1,22 @@
+# EAS uses this file instead of .gitignore when it exists.
+node_modules/
+.git/
+.expo/
+dist/
+web-build/
+android/
+ios/
+
+# Local secrets must not be uploaded.
+.env
+.env.*
+!.env.example
+
+# Signing and machine-specific files
+*.jks
+*.keystore
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
