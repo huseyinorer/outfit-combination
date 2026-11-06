@@ -141,6 +141,8 @@ To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or 
 - If `mobile/app-version.json` has a version with no matching GitHub Release, EAS builds an APK and publishes it as `outfit-combination.apk`.
 - The app checks `/api/version` on startup and opens the latest APK download when a mandatory native update exists.
 
+The Render Blueprint uses the Free compute plan. The service can spin down after an idle period, so clothing analysis and outfit requests allow up to 90 seconds for a cold start. A failed analysis keeps its local draft and can be retried safely.
+
 Compatible TypeScript, styling, text, and asset changes can use OTA updates. Native dependencies, Expo plugins, Android permissions, manifests, and SDK changes require a new APK version.
 
 ## Versioning

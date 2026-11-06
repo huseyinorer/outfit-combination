@@ -70,7 +70,7 @@ MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combinati
 
 `OpenAI__Model` varsayılan olarak `gpt-5.4-mini` ayarlanmıştır ve Render ortam değişkeninden değiştirilebilir. Anahtar yalnız Render backend'inde bulunur; APK'ya, Expo ortamına veya Git'e girmez.
 
-`render.yaml`, Frankfurt bölgesinde en küçük ücretli `0.5c-512mb` web service planını seçer. Bu, API'nin boşta kapanmaması içindir ve Render hesabında ücret oluşturur. Ücretsiz deneme istersen Blueprint'i uygulamadan önce planı `free` yapabilirsin; ancak servis 15 dakika boşta kalınca kapanır ve ilk istek yaklaşık bir dakika bekleyebilir.
+`render.yaml`, Frankfurt bölgesinde ücretsiz `free` web service planını seçer. Ödeme bilgisi gerekmez; ancak servis 15 dakika boşta kalınca kapanır ve ilk istek yaklaşık bir dakika bekleyebilir. Mobil analiz ve kombin istekleri bu soğuk başlangıca izin vermek için 90 saniye zaman aşımı kullanır. İlk istek yine de kesilirse fotoğraf taslağı kaybolmaz; yeniden denendiğinde uyanmış servis yanıt verir.
 
 Render `After CI Checks Pass` modundadır. Böylece `main` değişikliği önce GitHub testlerinden geçer, sonra Docker ile ASP.NET API yayımlanır. Sağlık adresi:
 

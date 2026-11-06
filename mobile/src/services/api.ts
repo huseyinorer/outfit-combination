@@ -37,7 +37,8 @@ export async function analyzeClothing(
   );
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  // Render Free can take about a minute to wake after an idle period.
+  const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     const response = await fetch(`${cleanBaseUrl(baseUrl)}/api/analyze`, {
       method: 'POST',
@@ -76,7 +77,8 @@ export async function requestOutfits(
 ): Promise<OutfitResult> {
   if (!cleanBaseUrl(baseUrl)) throw new Error('API adresi ayarlanmamış.');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  // Allow the first request to include a possible Render Free cold start.
+  const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     // Bu gövde bilinçli olarak fotoğraf, URI, dosya yolu ve base64 içermez.
     const response = await fetch(`${cleanBaseUrl(baseUrl)}/api/outfits`, {

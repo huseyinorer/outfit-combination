@@ -3,7 +3,7 @@ services:
     name: outfit-combination-api
     runtime: docker
     region: frankfurt
-    plan: 0.5c-512mb
+    plan: free
     dockerfilePath: ./api/Dockerfile
     dockerContext: .
     healthCheckPath: /health
