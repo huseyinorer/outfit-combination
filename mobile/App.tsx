@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Alert, BackHandler, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateGate } from './src/components/UpdateGate';
@@ -9,17 +9,30 @@ import {
   initializeDatabase,
   insertClothing,
   listClothing,
+  listFavoriteOutfits,
   removeClothing,
+  removeFavoriteOutfit,
   savePendingDraft,
+  saveFavoriteOutfit,
   setSetting,
   updateClothing,
 } from './src/data/database';
-import type { Category, ClothingDraft, ClothingItem, OutfitSuggestion } from './src/domain/types';
+import { outfitKey } from './src/domain/outfitEngine';
+import type {
+  Category,
+  ClothingDraft,
+  ClothingItem,
+  FavoriteOutfit,
+  OutfitPreferences,
+  OutfitSuggestion,
+} from './src/domain/types';
 import { evaluateVersion, type MobileVersionInfo, type VersionDecision } from './src/domain/version';
+import { tactileSuccess } from './src/services/feedback';
 import { deleteStoredImage } from './src/services/imageStorage';
 import { fetchMobileVersion, getCurrentAppVersion } from './src/services/version';
 import { AddClothingScreen } from './src/screens/AddClothingScreen';
 import { EditClothingScreen } from './src/screens/EditClothingScreen';
+import { FavoritesScreen } from './src/screens/FavoritesScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { RecommendScreen } from './src/screens/RecommendScreen';
 import { ResultsScreen } from './src/screens/ResultsScreen';
@@ -31,7 +44,8 @@ type Screen =
   | { name: 'add'; category?: Category; resume?: boolean }
   | { name: 'edit'; item: ClothingItem }
   | { name: 'recommend' }
-  | { name: 'results'; suggestions: OutfitSuggestion[]; warning?: string }
+  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string }
+  | { name: 'favorites' }
   | { name: 'settings' };
 
 const bundledApiUrl = String(Constants.expoConfig?.extra?.apiBaseUrl ?? '');
@@ -39,6 +53,7 @@ const bundledApiUrl = String(Constants.expoConfig?.extra?.apiBaseUrl ?? '');
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const [items, setItems] = useState<ClothingItem[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteOutfit[]>([]);
   const [pendingDraft, setPendingDraftState] = useState<ClothingDraft | null>(null);
   const [demoMode, setDemoMode] = useState(true);
   const [apiUrl, setApiUrl] = useState(bundledApiUrl);
@@ -50,18 +65,29 @@ export default function App() {
   const currentVersion = getCurrentAppVersion();
 
   const refresh = async () => setItems(await listClothing());
+  const refreshFavorites = async () => setFavorites(await listFavoriteOutfits());
+
+  const goBack = useCallback(() => {
+    if (screen.name === 'results') {
+      setScreen({ name: 'recommend' });
+      return;
+    }
+    if (screen.name !== 'home') setScreen({ name: 'home' });
+  }, [screen.name]);
 
   useEffect(() => {
     const start = async () => {
       try {
         await initializeDatabase();
-        const [storedItems, draft, storedDemo, storedApi] = await Promise.all([
+        const [storedItems, storedFavorites, draft, storedDemo, storedApi] = await Promise.all([
           listClothing(),
+          listFavoriteOutfits(),
           getPendingDraft(),
           getSetting('demo_mode'),
           getSetting('api_url'),
         ]);
         setItems(storedItems);
+        setFavorites(storedFavorites);
         setPendingDraftState(draft);
         setDemoMode(storedDemo === null ? true : storedDemo === 'true');
         setApiUrl(storedApi ?? bundledApiUrl);
@@ -89,6 +115,15 @@ export default function App() {
       });
   }, [apiUrl, currentVersion, ready]);
 
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen.name === 'home') return false;
+      goBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [goBack, screen.name]);
+
   const persistDraft = async (draft: ClothingDraft | null) => {
     await savePendingDraft(draft);
     setPendingDraftState(draft);
@@ -97,12 +132,14 @@ export default function App() {
   const saveNewItem = async (item: ClothingItem) => {
     await insertClothing(item);
     await refresh();
+    tactileSuccess('Kıyafet dolabına eklendi.');
     setScreen({ name: 'home' });
   };
 
   const saveEditedItem = async (item: ClothingItem) => {
     await updateClothing(item);
     await refresh();
+    tactileSuccess('Değişiklikler kaydedildi.');
     setScreen({ name: 'home' });
   };
 
@@ -110,8 +147,26 @@ export default function App() {
     await removeClothing(item.id);
     deleteStoredImage(item.photoUri);
     deleteStoredImage(item.cutoutUri);
-    await refresh();
+    await Promise.all([refresh(), refreshFavorites()]);
+    tactileSuccess('Kıyafet silindi.');
     setScreen({ name: 'home' });
+  };
+
+  const toggleFavorite = async (suggestion: OutfitSuggestion) => {
+    try {
+      const key = outfitKey(suggestion);
+      const existing = favorites.find((favorite) => outfitKey(favorite) === key);
+      if (existing) {
+        await removeFavoriteOutfit(existing.id);
+        tactileSuccess('Kombin favorilerden çıkarıldı.');
+      } else {
+        await saveFavoriteOutfit(suggestion);
+        tactileSuccess('Kombin favorilere eklendi.');
+      }
+      await refreshFavorites();
+    } catch (error) {
+      Alert.alert('Favori güncellenemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+    }
   };
 
   const saveSettings = async (nextDemo: boolean, nextApiUrl: string) => {
@@ -121,6 +176,7 @@ export default function App() {
     ]);
     setDemoMode(nextDemo);
     setApiUrl(nextApiUrl);
+    tactileSuccess('Ayarlar kaydedildi.');
     setScreen({ name: 'home' });
   };
 
@@ -155,7 +211,7 @@ export default function App() {
           initialDraft={screen.resume ? pendingDraft : null}
           onPersistDraft={persistDraft}
           onSave={saveNewItem}
-          onBack={() => setScreen({ name: 'home' })}
+          onBack={goBack}
         />
       );
       break;
@@ -165,7 +221,7 @@ export default function App() {
           item={screen.item}
           onSave={saveEditedItem}
           onDelete={deleteItem}
-          onBack={() => setScreen({ name: 'home' })}
+          onBack={goBack}
         />
       );
       break;
@@ -175,9 +231,9 @@ export default function App() {
           items={items}
           demoMode={demoMode}
           apiUrl={apiUrl}
-          onBack={() => setScreen({ name: 'home' })}
+          onBack={goBack}
           onAddCategory={(category) => setScreen({ name: 'add', category })}
-          onResults={(suggestions, warning) => setScreen({ name: 'results', suggestions, warning })}
+          onResults={(suggestions, warning, preferences) => setScreen({ name: 'results', suggestions, warning, preferences })}
         />
       );
       break;
@@ -186,13 +242,26 @@ export default function App() {
         <ResultsScreen
           items={items}
           suggestions={screen.suggestions}
+          preferences={screen.preferences}
+          favorites={favorites}
           warning={screen.warning}
-          onBack={() => setScreen({ name: 'recommend' })}
+          onToggleFavorite={toggleFavorite}
+          onBack={goBack}
+        />
+      );
+      break;
+    case 'favorites':
+      content = (
+        <FavoritesScreen
+          items={items}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
+          onBack={goBack}
         />
       );
       break;
     case 'settings':
-      content = <SettingsScreen demoMode={demoMode} apiUrl={apiUrl} onSave={saveSettings} onBack={() => setScreen({ name: 'home' })} />;
+      content = <SettingsScreen demoMode={demoMode} apiUrl={apiUrl} onSave={saveSettings} onBack={goBack} />;
       break;
     default:
       content = (
@@ -203,8 +272,12 @@ export default function App() {
           onAdd={(category) => setScreen({ name: 'add', category })}
           onRecommend={() => setScreen({ name: 'recommend' })}
           onOpen={(item) => setScreen({ name: 'edit', item })}
+          onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onSettings={() => setScreen({ name: 'settings' })}
+          onModePress={() => setScreen({ name: 'settings' })}
+          onFavorites={() => setScreen({ name: 'favorites' })}
+          favoriteCount={favorites.length}
         />
       );
   }

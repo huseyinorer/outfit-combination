@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildLocalSuggestions,
   completeSuggestions,
   getMissingCategories,
+  outfitKey,
   resolveOutfitItems,
   validateAiSuggestions,
 } from './outfitEngine.ts';
@@ -93,5 +95,24 @@ test('API kesintisinde elle kaydedilen kayıtlar ve fotoğraflar ID ile eşleşi
   assert.equal(resolved.top?.photoUri, 'file:///t1.jpg');
   assert.equal(resolved.bottom?.photoUri, 'file:///b1.jpg');
   assert.equal(resolved.shoes?.photoUri, 'file:///s1.jpg');
+});
+
+test('kombin anahtarı aynı üçlü için kararlıdır', () => {
+  assert.equal(
+    outfitKey({ topId: 't1', bottomId: 'b1', shoeId: 's1' }),
+    't1|b1|s1',
+  );
+});
+
+test('başka kombin isteği daha önce görülen üçlüleri dışlar', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('t2', 'top'), item('t3', 'top'),
+    item('b1', 'bottom'), item('b2', 'bottom'),
+    item('s1', 'shoes'), item('s2', 'shoes'),
+  ];
+  const first = buildLocalSuggestions(wardrobe, preferences).slice(0, 3);
+  const next = buildLocalSuggestions(wardrobe, preferences, new Set(first.map(outfitKey))).slice(0, 3);
+  assert.equal(next.length, 3);
+  assert.equal(first.some((seen) => next.some((candidate) => outfitKey(seen) === outfitKey(candidate))), false);
 });
 

@@ -34,7 +34,7 @@ interface Triple {
 }
 
 const normalize = (value: string) => value.trim().toLocaleLowerCase('tr-TR');
-const keyOf = (suggestion: Pick<OutfitSuggestion, 'topId' | 'bottomId' | 'shoeId'>) =>
+export const outfitKey = (suggestion: Pick<OutfitSuggestion, 'topId' | 'bottomId' | 'shoeId'>) =>
   `${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`;
 
 export function getMissingCategories(items: ClothingItem[]): Category[] {
@@ -59,7 +59,7 @@ export function validateAiSuggestions(
     const top = byId.get(candidate.topId);
     const bottom = byId.get(candidate.bottomId);
     const shoes = byId.get(candidate.shoeId);
-    const key = keyOf(candidate);
+    const key = outfitKey(candidate);
     const valid =
       top?.category === 'top' &&
       bottom?.category === 'bottom' &&
@@ -175,7 +175,7 @@ export function completeSuggestions(
   const validAi = validateAiSuggestions(items, aiCandidates)
     .slice(0, target)
     .map((suggestion) => ({ ...suggestion, source: 'ai' as const }));
-  const seen = new Set(validAi.map(keyOf));
+  const seen = new Set(validAi.map(outfitKey));
   const local = buildLocalSuggestions(items, preferences, seen);
   return [...validAi, ...local].slice(0, target);
 }

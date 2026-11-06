@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,11 +9,14 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 import { ClothingForm } from '../components/ClothingForm';
+import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
+import { getSetting, setSetting } from '../data/database';
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -43,13 +46,31 @@ interface Props {
 }
 
 export function AddClothingScreen(props: Props) {
+  const { width } = useWindowDimensions();
   const [draft, setDraft] = useState<ClothingDraft | null>(props.initialDraft);
   const [category, setCategory] = useState<Category | null>(props.initialDraft?.category ?? props.initialCategory ?? null);
   const [busy, setBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualMode, setManualMode] = useState(props.demoMode || Boolean(props.initialDraft?.analysisError));
+  const [analysisElapsed, setAnalysisElapsed] = useState(0);
+  const [lastSource, setLastSource] = useState<'camera' | 'gallery'>('camera');
   const savingRef = useRef(false);
+  const analysisRequestRef = useRef<AbortController | null>(null);
   const hasPhoto = Boolean(draft?.photoUri);
+  const wide = width >= 900;
+
+  useEffect(() => {
+    getSetting('last_photo_source').then((value) => {
+      if (value === 'gallery' || value === 'camera') setLastSource(value);
+    });
+    return () => analysisRequestRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!analyzing) return undefined;
+    const timer = setInterval(() => setAnalysisElapsed((value) => value + 1), 1_000);
+    return () => clearInterval(timer);
+  }, [analyzing]);
 
   const stepTitle = useMemo(() => {
     if (!category) return 'Kategori seç';
@@ -69,9 +90,14 @@ export function AddClothingScreen(props: Props) {
       await persist(next);
       return;
     }
+    analysisRequestRef.current?.abort();
+    const controller = new AbortController();
+    analysisRequestRef.current = controller;
+    setAnalysisElapsed(0);
     setAnalyzing(true);
+    setManualMode(false);
     try {
-      const result = await analyzeClothing(props.apiUrl, current.category, current.photoUri);
+      const result = await analyzeClothing(props.apiUrl, current.category, current.photoUri, controller.signal);
       await persist({
         ...current,
         attributes: {
@@ -90,12 +116,21 @@ export function AddClothingScreen(props: Props) {
       });
       setManualMode(false);
     } catch (error) {
+      if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : 'Analiz servisine ulaşılamadı.';
       await persist({ ...current, analysisError: message });
       setManualMode(true);
     } finally {
+      if (analysisRequestRef.current === controller) analysisRequestRef.current = null;
       setAnalyzing(false);
     }
+  };
+
+  const continueManually = async (current: ClothingDraft) => {
+    analysisRequestRef.current?.abort();
+    setManualMode(true);
+    setAnalyzing(false);
+    await persist({ ...current, analysisError: null });
   };
 
   const acceptAsset = async (uri: string) => {
@@ -129,7 +164,11 @@ export function AddClothingScreen(props: Props) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-    if (!result.canceled && result.assets[0]) await acceptAsset(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      setLastSource('gallery');
+      await setSetting('last_photo_source', 'gallery');
+      await acceptAsset(result.assets[0].uri);
+    }
   };
 
   const takePhoto = async () => {
@@ -139,8 +178,34 @@ export function AddClothingScreen(props: Props) {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, cameraType: ImagePicker.CameraType.back });
-    if (!result.canceled && result.assets[0]) await acceptAsset(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      setLastSource('camera');
+      await setSetting('last_photo_source', 'camera');
+      await acceptAsset(result.assets[0].uri);
+    }
   };
+
+  const openSource = (source: 'camera' | 'gallery') => {
+    const open = source === 'camera' ? takePhoto : pickFromLibrary;
+    if (!hasPhoto) {
+      void open();
+      return;
+    }
+    Alert.alert(
+      'Fotoğrafı değiştir',
+      'Yeni fotoğraf başarıyla hazırlanana kadar mevcut taslak korunur. Devam edilsin mi?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Değiştir', onPress: () => void open() },
+      ],
+    );
+  };
+
+  const analysisMessage = analysisElapsed < 4
+    ? 'Fotoğraf güvenli biçimde gönderiliyor…'
+    : analysisElapsed < 18
+      ? 'AI kıyafetin renk ve tarzını inceliyor…'
+      : 'Ücretsiz sunucu uyanıyor olabilir; fotoğrafın ve taslağın güvende.';
 
   const save = async () => {
     if (!draft || savingRef.current) return;
@@ -171,7 +236,8 @@ export function AddClothingScreen(props: Props) {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScreenHeader title={stepTitle} onBack={props.onBack} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <ContentFrame maxWidth={1080} style={styles.content}>
         {!category ? (
           <>
             <Text style={styles.heading}>Ne ekliyorsun?</Text>
@@ -192,47 +258,73 @@ export function AddClothingScreen(props: Props) {
               <Text style={styles.guideTitle}>Daha iyi sonuç için</Text>
               <Text style={styles.guideText}>{guidance[category]}</Text>
             </View>
-            <PrimaryButton title="Kamerayla çek" onPress={takePhoto} disabled={busy} />
-            <SecondaryButton title="Galeriden seç" onPress={pickFromLibrary} disabled={busy} />
-            {busy ? <ActivityIndicator color={colors.primary} /> : null}
+            <PrimaryButton
+              title={lastSource === 'camera' ? 'Kamerayla çek · Son kullanılan' : 'Galeriden seç · Son kullanılan'}
+              onPress={() => openSource(lastSource)}
+              disabled={busy}
+            />
+            <SecondaryButton
+              title={lastSource === 'camera' ? 'Galeriden seç' : 'Kamerayla çek'}
+              onPress={() => openSource(lastSource === 'camera' ? 'gallery' : 'camera')}
+              disabled={busy}
+            />
+            {busy ? <View style={styles.busyRow}><ActivityIndicator color={colors.primary} /><Text style={styles.analysisText}>Fotoğraf hazırlanıyor…</Text></View> : null}
           </>
         ) : draft ? (
           <>
-            <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
-            {analyzing ? (
-              <View style={styles.analysisBox}>
-                <ActivityIndicator color={colors.primary} />
-                <Text style={styles.analysisText}>Fotoğraf bir kez analiz ediliyor…</Text>
+            <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
+              <View style={styles.mediaColumn}>
+                <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
+                {analyzing ? (
+                  <View style={styles.analysisBox}>
+                    <ActivityIndicator color={colors.primary} />
+                    <View style={styles.analysisCopy}>
+                      <Text style={styles.analysisTitle}>Analiz sürüyor · {analysisElapsed} sn</Text>
+                      <Text style={styles.analysisText}>{analysisMessage}</Text>
+                    </View>
+                  </View>
+                ) : null}
+                {draft.categoryConflict ? (
+                  <Notice tone="error">
+                    Model bu parçayı {draft.detectedCategory ? CATEGORY_LABELS[draft.detectedCategory] : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.
+                  </Notice>
+                ) : null}
+                {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
+                {draft.analysisError && !props.demoMode ? (
+                  <SecondaryButton title="Yeniden dene" onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
+                ) : null}
               </View>
-            ) : null}
-            {draft.categoryConflict ? (
-              <Notice tone="error">
-                Model bu parçayı {draft.detectedCategory ? CATEGORY_LABELS[draft.detectedCategory] : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.
-              </Notice>
-            ) : null}
-            {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
-            {draft.analysisError && !props.demoMode ? (
-              <View style={styles.row}>
-                <SecondaryButton title="Yeniden dene" onPress={() => runAnalysis(draft)} disabled={analyzing || busy} style={styles.rowButton} />
-                <SecondaryButton title="Elle tamamla" onPress={() => setManualMode(true)} style={styles.rowButton} />
+              <View style={styles.formColumn}>
+                {(manualMode || !analyzing) ? (
+                  <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
+                ) : (
+                  <Notice>Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.</Notice>
+                )}
               </View>
-            ) : null}
-            {(manualMode || !analyzing) ? (
-              <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
-            ) : null}
-            <PrimaryButton title="Kaydet" onPress={save} loading={busy} disabled={analyzing} />
-            <SecondaryButton title="Fotoğrafı değiştir" onPress={pickFromLibrary} disabled={busy || analyzing} />
+            </View>
             <Text style={styles.storageNote}>Fotoğraf kalıcı uygulama alanına alındı. Kaydet düğmesine art arda basmak ikinci kayıt oluşturmaz.</Text>
           </>
         ) : null}
+        </ContentFrame>
       </ScrollView>
+      {draft ? (
+        <StickyFooter>
+          {analyzing ? (
+            <SecondaryButton title="Beklemeden elle devam et" onPress={() => continueManually(draft)} style={styles.footerButton} />
+          ) : (
+            <SecondaryButton title="Fotoğrafı değiştir" onPress={() => openSource(lastSource)} disabled={busy} style={styles.footerButton} />
+          )}
+          <PrimaryButton title="Kaydet" onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
+        </StickyFooter>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.md, paddingBottom: 48, gap: spacing.md },
+  scrollContent: { paddingBottom: 32 },
+  content: { padding: spacing.md, gap: spacing.md },
   heading: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: spacing.md },
   subheading: { color: colors.muted, fontSize: 15 },
   categoryList: { gap: spacing.md, marginTop: spacing.md },
@@ -241,11 +333,17 @@ const styles = StyleSheet.create({
   guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: '#EEE7D8', gap: spacing.sm },
   guideTitle: { color: colors.accent, fontSize: 13, fontWeight: '800' },
   guideText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
+  reviewLayout: { gap: spacing.lg },
+  reviewLayoutWide: { flexDirection: 'row', alignItems: 'flex-start' },
+  mediaColumn: { flex: 0.9, minWidth: 280, gap: spacing.md },
+  formColumn: { flex: 1.1, minWidth: 280 },
   preview: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: '#EDE8DE' },
-  analysisBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
-  analysisText: { color: colors.primary, fontWeight: '700' },
-  row: { flexDirection: 'row', gap: spacing.sm },
-  rowButton: { flex: 1 },
+  analysisBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.primarySoft },
+  analysisCopy: { flex: 1, gap: 4 },
+  analysisTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  analysisText: { color: colors.primary, fontWeight: '700', lineHeight: 20 },
+  busyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  footerButton: { flex: 1 },
   storageNote: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
 });
 

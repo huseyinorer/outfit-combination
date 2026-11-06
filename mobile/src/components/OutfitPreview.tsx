@@ -1,4 +1,4 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 
@@ -6,26 +6,42 @@ interface Props {
   top: ClothingItem;
   bottom: ClothingItem;
   shoes: ClothingItem;
+  onPressItem?: (item: ClothingItem) => void;
 }
 
-function BoardPiece({ item, large = false }: { item: ClothingItem; large?: boolean }) {
+function BoardPiece({ item, large = false, onPress }: {
+  item: ClothingItem;
+  large?: boolean;
+  onPress?: (item: ClothingItem) => void;
+}) {
   return (
-    <View style={[styles.boardPiece, large && styles.boardPieceLarge]}>
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={`${item.name || item.subType} fotoğrafını büyüt`}
+      onPress={() => onPress?.(item)}
+      style={({ pressed }) => [styles.boardPiece, large && styles.boardPieceLarge, pressed && styles.pressed]}
+    >
       <Image source={{ uri: item.photoUri }} style={styles.boardImage} resizeMode="contain" />
       <Text numberOfLines={1} style={styles.pieceLabel}>{item.name || item.subType}</Text>
-    </View>
+    </Pressable>
   );
 }
 
-function Figure({ top, bottom, shoes }: Props) {
+function Figure({ top, bottom, shoes, onPressItem }: Props) {
   return (
     <View style={styles.figure}>
       <View style={styles.head} />
       <View style={styles.body} />
       <View style={styles.legs} />
-      <Image source={{ uri: top.cutoutUri! }} style={styles.figureTop} resizeMode="contain" />
-      <Image source={{ uri: bottom.cutoutUri! }} style={styles.figureBottom} resizeMode="contain" />
-      <Image source={{ uri: shoes.cutoutUri! }} style={styles.figureShoes} resizeMode="contain" />
+      <Pressable onPress={() => onPressItem?.(top)} style={styles.figureTop}>
+        <Image source={{ uri: top.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
+      </Pressable>
+      <Pressable onPress={() => onPressItem?.(bottom)} style={styles.figureBottom}>
+        <Image source={{ uri: bottom.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
+      </Pressable>
+      <Pressable onPress={() => onPressItem?.(shoes)} style={styles.figureShoes}>
+        <Image source={{ uri: shoes.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
+      </Pressable>
     </View>
   );
 }
@@ -36,10 +52,10 @@ export function OutfitPreview(props: Props) {
 
   return (
     <View style={styles.board}>
-      <BoardPiece item={props.top} large />
+      <BoardPiece item={props.top} large onPress={props.onPressItem} />
       <View style={styles.boardColumn}>
-        <BoardPiece item={props.bottom} />
-        <BoardPiece item={props.shoes} />
+        <BoardPiece item={props.bottom} onPress={props.onPressItem} />
+        <BoardPiece item={props.shoes} onPress={props.onPressItem} />
       </View>
     </View>
   );
@@ -65,6 +81,7 @@ const styles = StyleSheet.create({
   boardPieceLarge: { flex: 1.08 },
   boardImage: { flex: 1, width: '100%' },
   pieceLabel: { color: colors.text, fontSize: 12, fontWeight: '700', padding: 5 },
+  pressed: { opacity: 0.75 },
   figure: {
     height: 360,
     alignItems: 'center',
@@ -78,5 +95,5 @@ const styles = StyleSheet.create({
   figureTop: { position: 'absolute', top: 58, width: 178, height: 145 },
   figureBottom: { position: 'absolute', top: 170, width: 150, height: 145 },
   figureShoes: { position: 'absolute', top: 298, width: 164, height: 55 },
+  figureImage: { width: '100%', height: '100%' },
 });
-

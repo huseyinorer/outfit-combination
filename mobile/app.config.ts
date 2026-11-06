@@ -7,7 +7,7 @@ const config: ExpoConfig = {
   name: 'Outfit Combination',
   slug: 'outfit-combination',
   version: appVersion.version,
-  orientation: 'portrait',
+  orientation: 'default',
   userInterfaceStyle: 'light',
   android: {
     package: 'com.krofosyonel.outfitcombination',

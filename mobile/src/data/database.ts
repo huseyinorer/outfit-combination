@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { ClothingDraft, ClothingItem } from '../domain/types';
+import type { ClothingDraft, ClothingItem, FavoriteOutfit, OutfitSuggestion } from '../domain/types';
 
 type ClothingRow = Omit<
   ClothingItem,
@@ -44,6 +44,18 @@ export async function initializeDatabase(): Promise<void> {
       key TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS favorite_outfits (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL,
+      topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
+      source TEXT NULL,
+      createdAt TEXT NOT NULL,
+      UNIQUE(topId, bottomId, shoeId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_favorite_created ON favorite_outfits(createdAt DESC);
   `);
 }
 
@@ -121,6 +133,37 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
 export async function removeClothing(id: string): Promise<void> {
   const database = await db();
   await database.runAsync('DELETE FROM clothing_items WHERE id = ?', id);
+}
+
+export async function listFavoriteOutfits(): Promise<FavoriteOutfit[]> {
+  const database = await db();
+  return database.getAllAsync<FavoriteOutfit>(
+    'SELECT * FROM favorite_outfits ORDER BY createdAt DESC',
+  );
+}
+
+export async function saveFavoriteOutfit(suggestion: OutfitSuggestion): Promise<void> {
+  const database = await db();
+  const id = `${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`;
+  await database.runAsync(
+    `INSERT INTO favorite_outfits(id, title, topId, bottomId, shoeId, reason, source, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(topId, bottomId, shoeId) DO UPDATE SET
+       title = excluded.title, reason = excluded.reason, source = excluded.source`,
+    id,
+    suggestion.title,
+    suggestion.topId,
+    suggestion.bottomId,
+    suggestion.shoeId,
+    suggestion.reason,
+    suggestion.source ?? null,
+    new Date().toISOString(),
+  );
+}
+
+export async function removeFavoriteOutfit(id: string): Promise<void> {
+  const database = await db();
+  await database.runAsync('DELETE FROM favorite_outfits WHERE id = ?', id);
 }
 
 export async function getSetting(key: string): Promise<string | null> {

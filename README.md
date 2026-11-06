@@ -25,6 +25,8 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub, EAS, and Render setup.
 - Strict validation of returned IDs, categories, and duplicate combinations
 - Up to three different valid outfits when the wardrobe permits
 - Swipeable result cards using the actual photos associated with each returned ID
+- Persistent favorite outfits, full-screen photo viewing, and alternate local suggestions
+- Responsive phone, tablet, BlueStacks, portrait, and landscape layouts
 - Explicit Demo mode that works without an API key or running backend
 - Startup version check for new APK releases
 - Expo OTA updates for compatible JavaScript and asset changes
@@ -154,7 +156,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-For a native release, update both from `1.0.0` to a new semantic version such as `1.0.1`, then merge to `main`.
+The current native app version is `1.0.1`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -188,7 +190,7 @@ Verified test scenarios include:
 Current local verification:
 
 - Mobile TypeScript check passed
-- Mobile tests: 9/9 passed
+- Mobile tests: 11/11 passed
 - Backend Release build: 0 errors and 0 warnings
 - Backend tests: 5/5 passed
 

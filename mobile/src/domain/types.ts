@@ -52,6 +52,11 @@ export interface OutfitSuggestion {
   source?: 'ai' | 'local';
 }
 
+export interface FavoriteOutfit extends OutfitSuggestion {
+  id: string;
+  createdAt: string;
+}
+
 export interface OutfitResult {
   suggestions: OutfitSuggestion[];
   usedFallback: boolean;

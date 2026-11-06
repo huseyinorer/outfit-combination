@@ -71,7 +71,7 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.0.0", new MobileVersionService().LatestVersion);
+        Equal("1.0.1", new MobileVersionService().LatestVersion);
     }
 
     private static OutfitRequest Request(params WardrobeItem[] items) => new()

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { CATEGORY_LABELS, type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
 import { ClothingCard } from '../components/ClothingCard';
+import { ContentFrame } from '../components/layout';
 import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import { colors, radius, spacing } from '../theme/theme';
 
@@ -14,16 +15,54 @@ interface Props {
   onAdd: (category?: Category) => void;
   onRecommend: () => void;
   onOpen: (item: ClothingItem) => void;
+  onDelete: (item: ClothingItem) => Promise<void>;
   onResumeDraft: () => void;
   onSettings: () => void;
+  onModePress: () => void;
+  onFavorites: () => void;
+  favoriteCount: number;
 }
 
 export function HomeScreen(props: Props) {
+  const { width } = useWindowDimensions();
   const [filter, setFilter] = React.useState<Filter>('all');
   const visible = filter === 'all' ? props.items : props.items.filter((x) => x.category === filter);
+  const contentWidth = Math.min(Math.max(width - spacing.md * 2, 280), 1120);
+  const columns = contentWidth >= 1000 ? 4 : contentWidth >= 680 ? 3 : 2;
+  const cardWidth = (contentWidth - 12 * (columns - 1)) / columns;
+  const counts = {
+    top: props.items.filter((item) => item.category === 'top').length,
+    bottom: props.items.filter((item) => item.category === 'bottom').length,
+    shoes: props.items.filter((item) => item.category === 'shoes').length,
+  };
+  const readyForOutfits = counts.top > 0 && counts.bottom > 0 && counts.shoes > 0;
+
+  const openMenu = (item: ClothingItem) => Alert.alert(
+    item.name || CATEGORY_LABELS[item.category],
+    'Bu kıyafet için ne yapmak istiyorsun?',
+    [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Düzenle', onPress: () => props.onOpen(item) },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: () => Alert.alert('Kıyafeti sil', 'Fotoğraf ve kayıt kalıcı olarak silinecek.', [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Sil',
+            style: 'destructive',
+            onPress: () => void props.onDelete(item).catch((error: unknown) => {
+              Alert.alert('Silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+            }),
+          },
+        ]),
+      },
+    ],
+  );
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
+      <ContentFrame maxWidth={1120} style={styles.content}>
       <View style={styles.topBar}>
         <View>
           <Text style={styles.eyebrow}>KİŞİSEL GARDIROP</Text>
@@ -34,9 +73,10 @@ export function HomeScreen(props: Props) {
         </Pressable>
       </View>
 
-      <View style={[styles.modeBadge, props.demoMode ? styles.demoBadge : styles.aiBadge]}>
+      <Pressable onPress={props.onModePress} style={[styles.modeBadge, props.demoMode ? styles.demoBadge : styles.aiBadge]}>
         <Text style={styles.modeText}>{props.demoMode ? 'Demo modu · AI kapalı' : 'AI modu · Backend kullanılır'}</Text>
-      </View>
+        <Text style={styles.modeHint}>Değiştirmek için dokun</Text>
+      </Pressable>
 
       <View style={styles.actions}>
         <Text style={styles.prompt}>Bu akşam ne giysem?</Text>
@@ -51,9 +91,25 @@ export function HomeScreen(props: Props) {
         </Pressable>
       ) : null}
 
+      <View style={[styles.readiness, readyForOutfits ? styles.readinessReady : styles.readinessMissing]}>
+        <View style={styles.readinessCounts}>
+          <Text style={styles.readinessCount}>Üst {counts.top}</Text>
+          <Text style={styles.readinessCount}>Alt {counts.bottom}</Text>
+          <Text style={styles.readinessCount}>Ayakkabı {counts.shoes}</Text>
+        </View>
+        <Text style={styles.readinessText}>
+          {readyForOutfits ? '✓ Kombin oluşturmaya hazır' : 'Kombin için her kategoriden en az bir parça ekle.'}
+        </Text>
+      </View>
+
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Dolabım</Text>
-        <Text style={styles.count}>{props.items.length} parça</Text>
+        <View style={styles.sectionMeta}>
+          <Pressable onPress={props.onFavorites} hitSlop={8}>
+            <Text style={styles.favoriteLink}>Favoriler {props.favoriteCount}</Text>
+          </Pressable>
+          <Text style={styles.count}>{props.items.length} parça</Text>
+        </View>
       </View>
 
       <View style={styles.filters}>
@@ -79,16 +135,26 @@ export function HomeScreen(props: Props) {
         <Notice>Bu filtrede henüz parça yok.</Notice>
       ) : (
         <View style={styles.grid}>
-          {visible.map((item) => <ClothingCard key={item.id} item={item} onPress={() => props.onOpen(item)} />)}
+          {visible.map((item) => (
+            <ClothingCard
+              key={item.id}
+              item={item}
+              width={cardWidth}
+              onPress={() => props.onOpen(item)}
+              onMenu={() => openMenu(item)}
+            />
+          ))}
         </View>
       )}
+      </ContentFrame>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.md, paddingBottom: 48, gap: spacing.lg },
+  scrollContent: { paddingBottom: 48 },
+  content: { padding: spacing.md, gap: spacing.lg },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.sm },
   eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
   title: { color: colors.text, fontSize: 27, fontWeight: '900', marginTop: 3 },
@@ -98,6 +164,7 @@ const styles = StyleSheet.create({
   demoBadge: { backgroundColor: '#F3DFC9' },
   aiBadge: { backgroundColor: colors.primarySoft },
   modeText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  modeHint: { color: colors.muted, fontSize: 10, marginTop: 2 },
   actions: { gap: spacing.sm },
   prompt: { color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: 2 },
   actionButton: { width: '100%' },
@@ -105,10 +172,18 @@ const styles = StyleSheet.create({
   draftTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   draftText: { color: colors.muted, fontSize: 13 },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: -10 },
+  sectionMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  favoriteLink: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   sectionTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   count: { color: colors.muted, fontSize: 13 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  readiness: { borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
+  readinessReady: { backgroundColor: colors.primarySoft },
+  readinessMissing: { backgroundColor: '#F4E5D4' },
+  readinessCounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  readinessCount: { color: colors.text, fontSize: 14, fontWeight: '800' },
+  readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   empty: { borderRadius: radius.lg, backgroundColor: colors.surface, padding: spacing.xl, gap: spacing.md, alignItems: 'center' },
   emptyIcon: { color: colors.primary, fontSize: 48 },
   emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },

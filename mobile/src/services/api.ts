@@ -1,3 +1,5 @@
+import { fetch as expoFetch } from 'expo/fetch';
+import { File } from 'expo-file-system';
 import type {
   Category,
   ClothingAttributes,
@@ -23,24 +25,43 @@ async function readError(response: Response): Promise<string> {
   }
 }
 
+export async function checkApiHealth(baseUrl: string): Promise<boolean> {
+  const cleanUrl = cleanBaseUrl(baseUrl);
+  if (!cleanUrl) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await expoFetch(`${cleanUrl}/health`, { signal: controller.signal });
+    if (!response.ok) return false;
+    const body = (await response.json()) as { status?: string };
+    return body.status === 'ok';
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function analyzeClothing(
   baseUrl: string,
   category: Category,
   photoUri: string,
+  externalSignal?: AbortSignal,
 ): Promise<AnalyzeResponse> {
   if (!cleanBaseUrl(baseUrl)) throw new Error('API adresi ayarlanmamış.');
   const form = new FormData();
   form.append('category', category);
-  form.append(
-    'photo',
-    { uri: photoUri, name: 'clothing.jpg', type: 'image/jpeg' } as unknown as Blob,
-  );
+  const photo = new File(photoUri);
+  if (!photo.exists) throw new Error('Analiz edilecek fotoğraf bulunamadı.');
+  form.append('photo', photo);
 
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
   // Render Free can take about a minute to wake after an idle period.
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetch(`${cleanBaseUrl(baseUrl)}/api/analyze`, {
+    const response = await expoFetch(`${cleanBaseUrl(baseUrl)}/api/analyze`, {
       method: 'POST',
       body: form,
       signal: controller.signal,
@@ -54,6 +75,7 @@ export async function analyzeClothing(
     throw error;
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -81,7 +103,7 @@ export async function requestOutfits(
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     // Bu gövde bilinçli olarak fotoğraf, URI, dosya yolu ve base64 içermez.
-    const response = await fetch(`${cleanBaseUrl(baseUrl)}/api/outfits`, {
+    const response = await expoFetch(`${cleanBaseUrl(baseUrl)}/api/outfits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preferences, wardrobe: wardrobe.map(toApiItem) }),
