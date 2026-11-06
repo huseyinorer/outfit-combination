@@ -4,9 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>OutfitCombination.Api</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);OutfitCombination.Api.Tests/**/*</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="OutfitCombination.Api.Tests\**\*.cs" />
     <Content Include="..\mobile\app-version.json" Link="mobile-app-version.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

@@ -41,6 +41,7 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
+      - run: dotnet --version
       - run: dotnet restore api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj
       - run: dotnet build api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj -c Release --no-restore
       - run: dotnet run --project api/OutfitCombination.Api.Tests/OutfitCombination.Api.Tests.csproj -c Release --no-build

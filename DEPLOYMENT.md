@@ -22,7 +22,7 @@ Proje kökünde:
 cd C:\Users\krofosyonel\Desktop\OutfitCombination
 git add .
 git commit -m "Set up Outfit Combination CI and deployment"
-git remote add origin https://github.com/KULLANICI_ADIN/outfit-combination.git
+git remote add origin https://github.com/huseyinorer/outfit-combination.git
 git push -u origin main
 ```
 
@@ -65,7 +65,7 @@ Workflow her `main` merge'inde OTA yayınlar. `mobile/app-version.json` ve `mobi
 
 ```text
 OPENAI_API_KEY=sk-...
-MobileUpdate__AndroidDownloadUrl=https://github.com/KULLANICI_ADIN/outfit-combination/releases/latest/download/outfit-combination.apk
+MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combination/releases/latest/download/outfit-combination.apk
 ```
 
 `OpenAI__Model` varsayılan olarak `gpt-5.4-mini` ayarlanmıştır ve Render ortam değişkeninden değiştirilebilir. Anahtar yalnız Render backend'inde bulunur; APK'ya, Expo ortamına veya Git'e girmez.

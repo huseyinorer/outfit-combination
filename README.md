@@ -1,38 +1,56 @@
 # Outfit Combination
 
-Türkçe, tek kullanıcılı bir kişisel gardırop ve kombin öneri uygulaması. Mobil uygulama kıyafet kayıtlarını SQLite'ta, fotoğrafları uygulamanın kalıcı belge alanında tutar. Backend yalnızca fotoğraf analizi ve metinsel gardırop verisinden kombin önerisi için kullanılır.
+An Android-first, single-user wardrobe and outfit recommendation app. The mobile UI is in Turkish. Clothing records are stored in SQLite and photos are kept in the app's persistent document storage. The backend is used only for one-time clothing photo analysis, AI outfit suggestions, and mobile version information.
 
-## Proje yapısı
+## Project structure
 
-- `mobile/`: React Native + Expo SDK 58 + TypeScript
+- `mobile/`: React Native, Expo SDK 58, and TypeScript
 - `api/`: ASP.NET Core 8 Web API
-- `api/OutfitCombination.Api.Tests/`: ek test paketi istemeyen küçük backend test koşucusu
+- `api/OutfitCombination.Api.Tests/`: lightweight backend test runner with no additional test packages
+- `.github/workflows/pipeline.yml`: GitHub Actions checks, Expo OTA publishing, and APK releases
+- `render.yaml`: Render Blueprint for the API
 
-GitHub Actions, EAS OTA/APK ve Render otomatik dağıtım kurulumu için [DEPLOYMENT.md](./DEPLOYMENT.md) dosyasını izle. İlk sürümde Neon gerekmez; kullanıcı verisi cihazdaki SQLite ve kalıcı dosya alanında kalır.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub, EAS, and Render setup.
 
-Uygulama ilk açılışta **Demo modu** ile başlar. Demo modunda API anahtarı ve çalışan bilgisayar gerekmez: kendi fotoğrafını çekebilir/seçebilir, alanları elle girebilir ve kayıtlı kıyafetlerden yerel kurallarla kombin alabilirsin. Örnek kıyafetler dolaba otomatik eklenmez.
+## Main features
 
-## Hazır özellikler
+- Photo-focused wardrobe with Top, Bottom, and Shoes filters
+- Camera and gallery import with category-specific capture guidance
+- Persistent photos independent of temporary camera/gallery paths
+- SQLite draft recovery when analysis is unavailable
+- Retry and manual-entry paths when the AI service cannot be reached
+- Editable AI attributes before saving
+- Duplicate-save protection and unique clothing IDs
+- AI or local-rule outfit generation from three preferences
+- Strict validation of returned IDs, categories, and duplicate combinations
+- Up to three different valid outfits when the wardrobe permits
+- Swipeable result cards using the actual photos associated with each returned ID
+- Explicit Demo mode that works without an API key or running backend
+- Startup version check for new APK releases
+- Expo OTA updates for compatible JavaScript and asset changes
 
-- Üst, Alt ve Ayakkabı filtreli fotoğraf odaklı Dolabım ekranı
-- Kamera/galeri, kategoriye özel çekim yönlendirmesi ve görüntü yönünü normalize eden tek seferlik yeniden boyutlandırma
-- Kamera/galeri geçici yolundan bağımsız, uygulama belge alanında kalıcı fotoğraf
-- Analiz kesilirse SQLite'ta yarım kalan taslak, `Yeniden dene` ve `Elle tamamla`
-- AI alanlarını onaylama/düzeltme; kayıt düzenleme ve fotoğrafla birlikte silme
-- Aynı kayıt için benzersiz ID ve çift Kaydet dokunuşuna karşı kilit
-- Üç tercihle AI veya yerel kombin üretimi
-- AI kombin isteğinde yalnız metinsel özellikler ve ID'ler; fotoğraf/base64/URI/dosya yolu yok
-- ID, kategori ve tekrar doğrulaması; sınırlı AI yeniden denemesi; yerel tamamlama
-- Bir üçlü mümkünse bir, iki üçlü mümkünse iki, en az üç mümkünse üç farklı sonuç
-- Gerçek fotoğraflı, animasyonlu yatay sonuç kartları
+Reliable background removal is not part of this first release. When a trustworthy transparent cutout is unavailable, the result uses a clean three-item outfit board instead of stacking rectangular photos over a figure.
 
-Güvenilir bir arka plan ayırma modeli bu küçük ilk sürüme eklenmedi. Bu nedenle `cutoutUri` hazır değilken dikdörtgen fotoğraflar 2D figürün üstüne yığılmaz; üç gerçek parça düzenli bir **kombin panosu** olarak gösterilir. `OutfitPreview` bileşeni, ileride güvenilir şeffaf kopyalar üretildiğinde üst/alt/ayakkabıyı figürün doğru bölgelerine yerleştirecek yolu da içerir.
+## Demo mode
 
-## 1. Demo modunda mobil uygulamayı çalıştırma
+The app starts in Demo mode. No OpenAI key or backend is required:
 
-Gerekenler: Node.js LTS, fiziksel Android telefon ve geliştirme sırasında Expo uyumlu istemci veya development build.
+1. Add your own photo from the camera or gallery.
+2. Enter the clothing attributes manually.
+3. Save the item to the local SQLite wardrobe.
+4. Generate outfits with the local rule engine.
 
-PowerShell'de:
+No sample clothing is automatically added to the personal wardrobe.
+
+## Run the mobile app
+
+Requirements:
+
+- Node.js 24 or another Expo-supported Node.js LTS release
+- Android phone or BlueStacks
+- Expo account only when using EAS Build or EAS Update
+
+Run in PowerShell:
 
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\mobile
@@ -43,67 +61,65 @@ npm test
 npx expo start --clear
 ```
 
-Bu çalışma ortamında npm yalnız önbellekten kurulum yapabildiği için yeni eklenen `expo-updates` paketi indirilemedi. Normal internet bağlantılı PowerShell'de `npm install` çalıştırıldığında paket ve `package-lock.json` otomatik tamamlanır. Ardından `npx expo install --fix`, Expo SDK 58 ile uyumlu yama sürümlerini doğrular.
+The current managed environment could not download the newly added `expo-updates` package because npm was restricted to its local cache. Running `npm install` in a normal internet-connected PowerShell session updates both the package and `package-lock.json`.
 
-Uygulamada **Ayarlar > Demo modu** seçili kalsın. Kıyafet eklerken analiz yapılmaz; alanları elle doldurup kaydedebilirsin. Uygulamayı kapatıp açtığında SQLite kayıtları ve kalıcı fotoğraflar korunur.
+## Run the backend locally
 
-## 2. Backend ve gerçek AI modu
+The backend uses one AI provider: the OpenAI Responses API. Images are sent only during the initial analysis request. Outfit requests contain IDs, categories, and text attributes only.
 
-Backend tek sağlayıcı olarak OpenAI Responses API kullanır. Görsel `input_image` veri URL'siyle yalnız analiz çağrısında gönderilir. Her iki AI yanıtı da `text.format` içindeki katı `json_schema` ile alınır. Uygulama, OpenAI'nin resmi [görsel girdi](https://developers.openai.com/api/docs/guides/images-vision?api-mode=responses) ve [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) belgelerindeki REST sözleşmesine göre yazıldı.
-
-Bu bilgisayarda .NET 8 SDK `8.0.427` kurulu. PowerShell'de:
+Set secrets only in the backend environment:
 
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\api
-$env:OPENAI_API_KEY="kendi-anahtarin"
+$env:OPENAI_API_KEY="your-key"
 $env:OpenAI__Model="gpt-5.4-mini"
 dotnet restore
 dotnet build
 dotnet run --urls http://0.0.0.0:5080
 ```
 
-Model adı koda gömülü değildir; görsel okuyabilen ve hesabında erişilebilir bir model adı `OpenAI__Model` ile verilir. API anahtarını `appsettings.json`, mobil `.env`, kaynak kodu veya Git'e yazma. İstersen standart `OPENAI_API_KEY` yerine yalnız backend tarafından okunan `$env:OpenAI__ApiKey` de kullanabilirsin.
+Do not place the API key in source files, `appsettings.json`, Expo variables, the mobile app, or Git.
 
-Bilgisayarda sağlık kontrolü:
+Health and version endpoints:
 
-```powershell
-Invoke-RestMethod http://localhost:5080/health
+```text
+http://localhost:5080/health
+http://localhost:5080/api/version
 ```
 
-## 3. Telefonu aynı yerel ağdaki API'ye bağlama
+## Connect Android or BlueStacks to a local API
 
-Bu geliştirme oturumunda bilgisayarın etkin Ethernet IPv4 adresi `192.168.1.110` olarak görüldü. DHCP nedeniyle değişebilir; güncel adresi bulmak için:
+For BlueStacks, the host computer is commonly reachable from the emulator through:
+
+```text
+http://10.0.2.2:5080
+```
+
+For a physical phone on the same Wi-Fi network, find the computer's current IPv4 address:
 
 ```powershell
 ipconfig
 ```
 
-Telefon ve bilgisayar aynı modem/LAN üzerinde olmalı. Windows Güvenlik Duvarı sorarsa `dotnet` için yalnız **Özel ağlar** erişimine izin ver. Telefonda tarayıcıdan `http://192.168.1.110:5080/health` açılabilmeli. Telefonda `localhost`, telefonu ifade ettiği için kullanılmaz. Preview APK'nın yerel HTTP API'ye erişebilmesi için Android cleartext LAN trafiği `expo-build-properties` ile açıkça etkinleştirilmiştir; gerçek internet dağıtımında HTTPS backend kullanılması gerekir.
+Then use an address such as:
 
-İki yapılandırma yolu vardır:
-
-1. Geliştirme varsayılanı:
-
-```powershell
-cd C:\Users\krofosyonel\Desktop\OutfitCombination\mobile
-$env:EXPO_PUBLIC_API_URL="http://192.168.1.110:5080"
-npx expo start --clear
+```text
+http://192.168.1.110:5080
 ```
 
-2. Kurulu APK: Uygulamayı aç, **Ayarlar > Backend API adresi** alanına `http://192.168.1.110:5080` yaz ve **Gerçek AI** modunu seç. Adres SQLite'ta saklanır; yeni APK gerekmez.
+The API address can be changed from the app's Settings screen and is stored locally. Production builds should use the HTTPS Render URL through `EXPO_PUBLIC_API_URL`.
 
-Yerel backend bilgisayarda çalışmıyorsa veya bilgisayar kapalıysa:
+When the backend is unavailable:
 
-- Dolabı görüntüleme, kayıtları düzenleme/silme ve kalıcılık çalışır.
-- Kamera/galeriden fotoğraf ekleyip **Elle tamamla** ile kaydetme çalışır.
-- Kombinler API hatasından sonra telefondaki yerel kurallarla hazırlanır.
-- Yalnız gerçek görsel analizi ve AI tarafından yazılan kombin gerekçeleri kullanılamaz.
+- The wardrobe remains available.
+- Existing items can still be edited or deleted.
+- Photos can be added through manual entry.
+- Local outfit generation still works.
+- Only AI photo analysis and AI-written outfit explanations are unavailable.
 
-## 4. Doğrudan kurulabilir APK üretme
+## Build an installable Android APK
 
-`mobile/eas.json` içindeki `preview` profili Android `apk` üretir. EAS projesi `59dce122-82ee-47b4-a212-64ff019c662b` ile yapılandırıldı. Bu oturumdaki npm ağ kısıtı nedeniyle yeni native paket indirilemediğinden APK üretilmedi.
-
-EAS bulut derlemesi için:
+The `preview` profile in `mobile/eas.json` produces a directly installable APK:
 
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\mobile
@@ -113,46 +129,74 @@ npx eas-cli@latest login
 npx eas-cli@latest build --platform android --profile preview
 ```
 
-İlk Android derlemesinde EAS sorarsa yeni Android imzalama anahtarı oluşturmasını seçebilirsin. Derleme sonunda verilen bağlantıyı telefonda aç, APK'yı indir ve Android'in istediği `Bu kaynaktan uygulama yükle` iznini ver. APK kurulumu backend'i telefona kurmaz; gerçek AI için bilgisayardaki `dotnet run` işlemi ayrıca açık kalmalıdır.
+On the first build, allow EAS to create an Android keystore. Once credentials exist, GitHub Actions can perform non-interactive builds.
 
-USB/ADB sonradan kurulursa indirilen APK şu biçimde kurulabilir:
+To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or use its **Install APK** button.
 
-```powershell
-adb install -r .\outfit-combination-preview.apk
+## Automated release behavior
+
+- Pull requests run mobile and backend checks without publishing.
+- Merges to `main` trigger Render after CI checks pass.
+- When `DEPLOY_ENABLED=true`, merges to `main` also publish an Expo OTA update.
+- If `mobile/app-version.json` has a version with no matching GitHub Release, EAS builds an APK and publishes it as `outfit-combination.apk`.
+- The app checks `/api/version` on startup and opens the latest APK download when a mandatory native update exists.
+
+Compatible TypeScript, styling, text, and asset changes can use OTA updates. Native dependencies, Expo plugins, Android permissions, manifests, and SDK changes require a new APK version.
+
+## Versioning
+
+Keep these two values identical:
+
+```text
+mobile/package.json
+mobile/app-version.json
 ```
 
-## 5. Kontroller
+For a native release, update both from `1.0.0` to a new semantic version such as `1.0.1`, then merge to `main`.
 
-Mobil saf kombin motoru paket kurulumu gerektirmeden Node 24 ile çalıştırılabilir:
+## Tests
+
+Mobile:
 
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\mobile
+npm run typecheck
 npm test
 ```
 
-Backend test koşucusu:
+Backend:
 
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\api
-dotnet run --project .\OutfitCombination.Api.Tests\OutfitCombination.Api.Tests.csproj
+dotnet build .\OutfitCombination.Api.Tests\OutfitCombination.Api.Tests.csproj -c Release
+dotnet run --project .\OutfitCombination.Api.Tests\OutfitCombination.Api.Tests.csproj -c Release --no-build
 ```
 
-Test kapsamı:
+Verified test scenarios include:
 
-- Eksik ana kategori ve AI çağrısının atlanması
-- Yalnız bir mümkün üçlü
-- En az üç farklı üçlü
-- Modelin var olmayan veya yanlış kategoride ID döndürmesi
-- Modelin aynı üçlüyü tekrarlaması
-- API kesintisinde elle oluşturulan kayıtlarla yerel kombin ve sonuç fotoğraflarının ID eşleşmesi
+- Missing clothing category
+- Only one possible outfit
+- At least three distinct outfits
+- Invalid or wrong-category AI IDs
+- Duplicate AI combinations
+- Manual records after an API outage
+- Exact photo-to-ID matching
+- Semantic version comparison and mandatory update decisions
 
-Bu oturumda mobil TypeScript kontrolü başarılı, `npm test` sonucu 9/9 başarılı ve .NET Release derlemesi 0 hata/0 uyarıyla tamamlandı. Backend test koşucusu 5/5 geçti. Yerel HTTP portu çalışma ortamı güvenliği tarafından engellendiği için çalışan sürece gerçek HTTP isteği gönderilemedi; `/api/version` için sürüm dosyasının yayın çıktısına kopyalanması test edildi. SQLite kalıcılığı, kamera yönü ve gerçek cihazdaki panoya yerleşim fiziksel Android/BlueStacks üzerinde henüz doğrulanmadı.
+Current local verification:
 
-## 6. İlk kabul senaryosu
+- Mobile TypeScript check passed
+- Mobile tests: 9/9 passed
+- Backend Release build: 0 errors and 0 warnings
+- Backend tests: 5/5 passed
 
-1. APK'yı aç ve önce Demo modunda 3 Üst, 2 Alt, 2 Ayakkabı ekle; her fotoğrafın alanlarını elle tamamla.
-2. Uygulamayı Android son uygulamalar ekranından tamamen kapatıp yeniden aç; `Dolabım` başlığında 7 parça göründüğünü doğrula.
-3. `Kombin Öner` > `Arkadaş buluşması` > `Smart casual` > `Koyu` seç.
-4. Üç karta sağa–sola kaydır. Kart altındaki Üst/Alt/Ayakkabı adlarının, kartta gösterilen üç gerçek fotoğrafla birebir eşleştiğini doğrula.
-5. Sonra backend'i çalıştır, API adresini kaydet ve Gerçek AI moduna geçerek bir yeni kıyafetin otomatik analizini dene.
+SQLite persistence, camera orientation, and final photo placement still require validation inside BlueStacks or on a physical Android device.
 
+## Acceptance scenario
+
+1. Add 3 tops, 2 bottoms, and 2 pairs of shoes.
+2. Fully close and reopen the app.
+3. Confirm all seven items remain in the wardrobe.
+4. Select Friend meetup, Smart casual, and Dark.
+5. Confirm that three different outfit cards are shown.
+6. Confirm each card's three photos exactly match its top, bottom, and shoe IDs.
