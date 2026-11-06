@@ -1,5 +1,6 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
+import { normalizeApiBaseUrl } from '../domain/apiUrl';
 import type {
   Category,
   ClothingAttributes,
@@ -14,7 +15,7 @@ interface AnalyzeResponse extends ClothingAttributes {
   detectedCategory: Category | null;
 }
 
-const cleanBaseUrl = (baseUrl: string) => baseUrl.trim().replace(/\/$/, '');
+const cleanBaseUrl = normalizeApiBaseUrl;
 
 async function readError(response: Response): Promise<string> {
   try {
@@ -29,7 +30,8 @@ export async function checkApiHealth(baseUrl: string): Promise<boolean> {
   const cleanUrl = cleanBaseUrl(baseUrl);
   if (!cleanUrl) return false;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  // Render Free may need about a minute to wake after an idle period.
+  const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     const response = await expoFetch(`${cleanUrl}/health`, { signal: controller.signal });
     if (!response.ok) return false;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ContentFrame } from '../components/layout';
 import { Chip, Field, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
+import { isValidApiBaseUrl, normalizeApiBaseUrl } from '../domain/apiUrl';
 import { checkApiHealth } from '../services/api';
 import { colors, radius, spacing } from '../theme/theme';
 
@@ -12,18 +13,21 @@ export function SettingsScreen({ demoMode, apiUrl, onSave, onBack }: {
   onBack: () => void;
 }) {
   const [demo, setDemo] = useState(demoMode);
-  const [url, setUrl] = useState(apiUrl);
+  const [url, setUrl] = useState(normalizeApiBaseUrl(apiUrl));
   const [busy, setBusy] = useState(false);
-  const [advanced, setAdvanced] = useState(!apiUrl);
-  const [connection, setConnection] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle');
+  const [advanced, setAdvanced] = useState(!normalizeApiBaseUrl(apiUrl));
+  const [connection, setConnection] = useState<'idle' | 'checking' | 'online' | 'offline' | 'invalid'>('idle');
+  const normalizedUrl = normalizeApiBaseUrl(url);
+  const validUrl = isValidApiBaseUrl(url);
 
   const testConnection = async () => {
-    if (!url.trim()) {
-      setConnection('offline');
+    if (!validUrl) {
+      setConnection('invalid');
       return;
     }
+    setUrl(normalizedUrl);
     setConnection('checking');
-    setConnection(await checkApiHealth(url) ? 'online' : 'offline');
+    setConnection(await checkApiHealth(normalizedUrl) ? 'online' : 'offline');
   };
 
   useEffect(() => {
@@ -34,7 +38,7 @@ export function SettingsScreen({ demoMode, apiUrl, onSave, onBack }: {
 
   const save = async () => {
     setBusy(true);
-    try { await onSave(demo, url.trim().replace(/\/$/, '')); }
+    try { await onSave(demo, normalizedUrl); }
     finally { setBusy(false); }
   };
 
@@ -55,7 +59,15 @@ export function SettingsScreen({ demoMode, apiUrl, onSave, onBack }: {
           <View style={styles.connectionRow}>
             <View style={[styles.dot, connection === 'online' ? styles.dotOnline : connection === 'offline' ? styles.dotOffline : styles.dotIdle]} />
             <Text style={styles.connectionText}>
-              {connection === 'checking' ? 'Backend kontrol ediliyor…' : connection === 'online' ? 'Backend bağlı' : connection === 'offline' ? 'Backend şu an yanıt vermiyor' : 'Backend henüz kontrol edilmedi'}
+              {connection === 'checking'
+                ? 'Backend kontrol ediliyor; Render uyanıyor olabilir…'
+                : connection === 'online'
+                  ? 'Backend bağlı'
+                  : connection === 'offline'
+                    ? 'Backend 90 saniye içinde yanıt vermedi'
+                    : connection === 'invalid'
+                      ? 'Backend adresi geçersiz'
+                      : 'Backend henüz kontrol edilmedi'}
             </Text>
           </View>
           <SecondaryButton title={connection === 'checking' ? 'Kontrol ediliyor…' : 'Bağlantıyı test et'} onPress={testConnection} disabled={connection === 'checking'} />
@@ -76,9 +88,10 @@ export function SettingsScreen({ demoMode, apiUrl, onSave, onBack }: {
             hint="Üretimde Render HTTPS adresi; yerel geliştirmede bilgisayarın IPv4 adresi kullanılır."
           />
         ) : null}
-        {!demo && !url.trim() ? <Notice tone="error">Gerçek AI modu için API adresi gerekli.</Notice> : null}
+        {!demo && !validUrl ? <Notice tone="error">Gerçek AI modu için http:// veya https:// ile başlayan geçerli bir API adresi gerekli.</Notice> : null}
+        {url.trim() !== normalizedUrl ? <Notice>Adresin sonundaki boşluk ve ek parametre kaydederken otomatik temizlenecek.</Notice> : null}
         <Notice>API anahtarı bu uygulamaya yazılmaz; yalnızca güvenli backend ortam değişkeninde bulunur.</Notice>
-        <PrimaryButton title="Ayarları kaydet" onPress={save} loading={busy} disabled={!demo && !url.trim()} />
+        <PrimaryButton title="Ayarları kaydet" onPress={save} loading={busy} disabled={!demo && !validUrl} />
         </ContentFrame>
       </ScrollView>
     </KeyboardAvoidingView>

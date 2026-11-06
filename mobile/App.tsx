@@ -18,6 +18,7 @@ import {
   updateClothing,
 } from './src/data/database';
 import { outfitKey } from './src/domain/outfitEngine';
+import { normalizeApiBaseUrl } from './src/domain/apiUrl';
 import type {
   Category,
   ClothingDraft,
@@ -48,7 +49,7 @@ type Screen =
   | { name: 'favorites' }
   | { name: 'settings' };
 
-const bundledApiUrl = String(Constants.expoConfig?.extra?.apiBaseUrl ?? '');
+const bundledApiUrl = normalizeApiBaseUrl(String(Constants.expoConfig?.extra?.apiBaseUrl ?? ''));
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
@@ -90,7 +91,11 @@ export default function App() {
         setFavorites(storedFavorites);
         setPendingDraftState(draft);
         setDemoMode(storedDemo === null ? true : storedDemo === 'true');
-        setApiUrl(storedApi ?? bundledApiUrl);
+        const resolvedApiUrl = normalizeApiBaseUrl(storedApi ?? bundledApiUrl);
+        setApiUrl(resolvedApiUrl);
+        if (storedApi !== null && storedApi !== resolvedApiUrl) {
+          await setSetting('api_url', resolvedApiUrl);
+        }
       } catch (error) {
         setStartupError(error instanceof Error ? error.message : 'Veritabanı açılamadı.');
       } finally {
@@ -170,12 +175,13 @@ export default function App() {
   };
 
   const saveSettings = async (nextDemo: boolean, nextApiUrl: string) => {
+    const normalizedApiUrl = normalizeApiBaseUrl(nextApiUrl);
     await Promise.all([
       setSetting('demo_mode', String(nextDemo)),
-      setSetting('api_url', nextApiUrl),
+      setSetting('api_url', normalizedApiUrl),
     ]);
     setDemoMode(nextDemo);
-    setApiUrl(nextApiUrl);
+    setApiUrl(normalizedApiUrl);
     tactileSuccess('Ayarlar kaydedildi.');
     setScreen({ name: 'home' });
   };

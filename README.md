@@ -190,7 +190,7 @@ Verified test scenarios include:
 Current local verification:
 
 - Mobile TypeScript check passed
-- Mobile tests: 11/11 passed
+- Mobile tests: 13/13 passed
 - Backend Release build: 0 errors and 0 warnings
 - Backend tests: 5/5 passed
 
