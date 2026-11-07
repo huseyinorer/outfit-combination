@@ -1,6 +1,6 @@
 # GitHub, EAS ve Render yayın akışı
 
-Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API yalnızca OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Neon yalnız kalıcı günlük/aylık AI kullanım sayaçları için kullanılır; kişisel dolabın sunucu veritabanına kopyalanmaz.
+Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API Google hesap oturumu, kullanıcı bazlı AI hakkı, OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Neon hesap profili ve kalıcı günlük/aylık AI kullanım sayaçları için kullanılır; kişisel dolabın sunucu veritabanına kopyalanmaz.
 
 ## Otomatik akış
 
@@ -8,7 +8,7 @@ Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap ver
 | --- | --- | --- |
 | Pull request açılması | Mobil typecheck/test ve .NET build/test | Yayın yapılmaz |
 | `main` dalına merge | Aynı kontroller ve Render deploy; ilk kurulum etkinleştirildikten sonra EAS Update | JS ve görseller uygulamanın sonraki açılışında OTA gelir |
-| `app-version.json` sürümü yükseltilerek merge | Bunlara ek olarak EAS bir APK üretir ve GitHub Release'a `outfit-combination.apk` ekler | Uygulama açılışta yeni APK'yı zorunlu gösterir |
+| `app-version.json` sürümü yükseltilerek merge | Bunlara ek olarak EAS bir APK üretir ve GitHub Release'a `outfit-combination.apk` ekler | Uygulama yeni APK'yı bildirir; yalnız `minimumVersion` altındaki sürümler zorunlu güncellenir |
 
 Native bağımlılık, Expo eklentisi, Android manifest/izin veya SDK değişikliği yeni APK gerektirir. Yalnız TypeScript, stil, metin ve asset değişiklikleri için sürümü yükseltmeden OTA yayın yeterlidir. Expo burada yalnız çoklu platform için değil; kamera/dosya/SQLite entegrasyonunu ve imzalı Android bulut derlemesiyle OTA kanalını yönetmek için kullanılır.
 
@@ -76,6 +76,26 @@ MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combinati
 
 `UsageQuota__ConnectionString` için Neon Dashboard'daki **Connect** ekranından PostgreSQL bağlantı bilgilerini al ve Render Secret olarak ekle. Backend ilk AI isteğinde `ai_usage_quota` tablosunu ve indeksini otomatik oluşturur. Günlük ve aylık analiz/kombin sayaçları atomik artırılır; 13 aydan eski dönemler temizlenir. Production ortamında Neon bağlantısı yoksa veya doğrulanamıyorsa maliyeti korumak için OpenAI isteği gönderilmez.
 
+### Google hesabını etkinleştirme
+
+Hesap özelliği varsayılan olarak kapalıdır; üç ayar birlikte verilmeden backend eski kurulum belirteciyle çalışmaya devam eder. Önce `v1.2.0` APK'sının oluştuğunu ve telefona kurulduğunu doğrula. Ardından Google Cloud Console'da OAuth izin ekranını hazırla ve **Web application** türünde bir OAuth 2.0 istemcisi oluştur. Yetkili dönüş adresi birebir şu olmalı:
+
+```text
+https://outfit-combination-api.onrender.com/api/account/google/callback
+```
+
+Render **Environment** alanına üç değeri birlikte ekle:
+
+```text
+AccountAuth__GoogleClientId=....apps.googleusercontent.com
+AccountAuth__GoogleClientSecret=...
+AccountAuth__CallbackUrl=https://outfit-combination-api.onrender.com/api/account/google/callback
+```
+
+Kaydedip deploy et. `GET /api/account/config` yanıtı `{"enabled":true}` olduğunda Ayarlar'da **Hesabım** kartı görünür ve AI işlemleri Google oturumu ister. Eski APK'ların AI çağrısını kaybetmemesi için hesap zorunluluğunu yalnız `v1.2.0` yayınlandıktan sonra aç; herkese dağıtımda ayrıca `MobileUpdate__MinimumVersion=1.2.0` yap.
+
+İkinci Neon veritabanı gerekmez. İlk Google girişinde `account_principals`, `app_users`, `account_oauth_attempts` ve `account_exchange_codes` tabloları aynı bağlantıda otomatik oluşur. Hesap silindiğinde e-posta/ad/Google kimliği kaldırılır; kota silip yeniden hesap açarak suistimal edilmesin diye profilden ayrılmış kullanım kimliği ve sayaçları en fazla 13 ay korunur. Google client secret yalnız Render'da bulunur; Expo veya GitHub değişkenine yazılmaz.
+
 `render.yaml`, Frankfurt bölgesinde ücretsiz `free` web service planını seçer. Ödeme bilgisi gerekmez; ancak servis 15 dakika boşta kalınca kapanır ve ilk istek yaklaşık bir dakika bekleyebilir. Mobil analiz ve kombin istekleri bu soğuk başlangıca izin vermek için 90 saniye zaman aşımı kullanır. İlk istek yine de kesilirse fotoğraf taslağı kaybolmaz; yeniden denendiğinde uyanmış servis yanıt verir.
 
 Render `After CI Checks Pass` modundadır. Böylece `main` değişikliği önce GitHub testlerinden geçer, sonra Docker ile ASP.NET API yayımlanır. Sağlık adresi:
@@ -94,7 +114,7 @@ https://SERVIS-ADIN.onrender.com/api/version
 
 İlk başarılı sürüm iş akışından sonra GitHub deposunda **Releases > v1.0.0 > outfit-combination.apk** dosyasını indir. APK'yı BlueStacks penceresine sürükleyip bırakabilir veya sağdaki **Install APK** düğmesinden seçebilirsin.
 
-Uygulama daha sonra yeni native sürüm görürse **APK'yı indir** düğmesini gösterir. İndirilen APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler.
+Uygulama daha sonra yeni native sürüm görürse **APK'yı indir** düğmesini gösterir. Normal güncellemeler **Daha sonra** ile ertelenebilir; güvenlik veya uyumluluk nedeniyle Render'daki `MobileUpdate__MinimumVersion` yükseltilirse eski sürüm zorunlu güncellenir. İndirilen APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler.
 
 ## 5. Gizlilik politikasını yayınlama
 
@@ -108,4 +128,4 @@ Bu adresi Play Console gizlilik politikası alanına yaz. Uygulamanın Ayarlar e
 
 ## 6. Neon ne zaman gerekir?
 
-Neon artık yalnız kalıcı AI kullanım kotası için kullanılır. Dolap kayıtları ve fotoğraflar hâlâ telefondadır; Render veya Neon'a kişisel dolap kopyası yazılmaz. Üyelik, çoklu cihaz senkronizasyonu veya bulut yedekleme daha sonra eklenirse hesap ve metadata Neon'da tutulabilir; fotoğraflar yine obje depolama servisine konmalıdır.
+Neon hesap profili ile kalıcı AI kullanım kotası için kullanılır. Dolap kayıtları ve fotoğraflar hâlâ telefondadır; Render veya Neon'a kişisel dolap kopyası yazılmaz. Çoklu cihaz senkronizasyonu veya bulut yedekleme daha sonra eklenirse metadata Neon'da, fotoğraflar ise obje depolama servisinde tutulmalıdır.

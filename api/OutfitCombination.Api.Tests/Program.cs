@@ -2,6 +2,8 @@ using OutfitCombination.Api.Models;
 using OutfitCombination.Api.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 
 namespace OutfitCombination.Api.Tests;
 
@@ -19,6 +21,12 @@ public static class TestRunner
             ("Kurulum belirteci doğrulama", InstallationTokenRoundTrip),
             ("Kurulum belirteci kurcalama", InstallationTokenTampering),
             ("Kurulum belirteci süre sonu", InstallationTokenExpiry),
+            ("Kullanıcı oturumu doğrulama", UserTokenRoundTrip),
+            ("Kurulum ve kullanıcı belirteci ayrımı", TokenTypeSeparation),
+            ("Eksiksiz hesap yapılandırması", CompleteAccountConfiguration),
+            ("Yarım hesap yapılandırması reddi", PartialAccountConfiguration),
+            ("Google OAuth isteğinde state korunur", GoogleAuthorizationUrl),
+            ("Başarısız AI isteği kullanım hakkını iade eder", QuotaRefund),
             ("Görsel imza doğrulama", ImageSignatureValidation),
             ("Büyük kombin girdisi reddi", OversizedOutfitInput),
             ("Mobil sürüm dosyası", MobileVersionFile)
@@ -79,7 +87,7 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.1.1", new MobileVersionService().LatestVersion);
+        Equal("1.2.0", new MobileVersionService().LatestVersion);
     }
 
     private static void ShortClothingName()
@@ -123,6 +131,82 @@ public static class TestRunner
         var token = service.Issue(Guid.NewGuid().ToString()).AccessToken;
         clock.UtcNow = clock.UtcNow.AddDays(31);
         Equal(false, service.TryValidate(token, out _));
+    }
+
+    private static void UserTokenRoundTrip()
+    {
+        var service = TokenService(new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero));
+        var userId = Guid.NewGuid();
+        var installationId = Guid.NewGuid().ToString();
+        var token = service.IssueUser(userId, installationId).AccessToken;
+        Equal(true, service.TryValidateUser(token, out var validatedUserId, out var validatedInstallationId));
+        Equal(userId, validatedUserId);
+        Equal(installationId, validatedInstallationId);
+    }
+
+    private static void TokenTypeSeparation()
+    {
+        var service = TokenService(new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero));
+        var installationId = Guid.NewGuid().ToString();
+        var installationToken = service.Issue(installationId).AccessToken;
+        var userToken = service.IssueUser(Guid.NewGuid(), installationId).AccessToken;
+        Equal(false, service.TryValidateUser(installationToken, out _, out _));
+        Equal(false, service.TryValidate(userToken, out _));
+    }
+
+    private static void CompleteAccountConfiguration()
+    {
+        var options = new AccountAuthOptions
+        {
+            GoogleClientId = "client.apps.googleusercontent.com",
+            GoogleClientSecret = "secret",
+            CallbackUrl = "https://example.com/api/account/google/callback"
+        };
+        Equal(true, options.Enabled);
+        Equal(false, options.PartiallyConfigured);
+    }
+
+    private static void PartialAccountConfiguration()
+    {
+        var options = new AccountAuthOptions { GoogleClientId = "client.apps.googleusercontent.com" };
+        Equal(false, options.Enabled);
+        Equal(true, options.PartiallyConfigured);
+    }
+
+    private static void GoogleAuthorizationUrl()
+    {
+        var service = new GoogleOAuthService(
+            new HttpClient(),
+            Options.Create(new AccountAuthOptions
+            {
+                GoogleClientId = "client.apps.googleusercontent.com",
+                GoogleClientSecret = "secret",
+                CallbackUrl = "https://example.com/api/account/google/callback"
+            }));
+        var url = service.BuildAuthorizationUrl("anti-forgery-state");
+        Equal(true, url.StartsWith("https://accounts.google.com/o/oauth2/v2/auth?", StringComparison.Ordinal));
+        Equal(true, url.Contains("state=anti-forgery-state", StringComparison.Ordinal));
+        Equal(true, url.Contains("response_type=code", StringComparison.Ordinal));
+    }
+
+    private static void QuotaRefund()
+    {
+        var service = new PersistentUsageQuotaService(
+            Options.Create(new UsageQuotaOptions
+            {
+                DailyAnalysisLimit = 1,
+                MonthlyAnalysisLimit = 1,
+                DailyOutfitLimit = 1,
+                MonthlyOutfitLimit = 1
+            }),
+            new TestHostEnvironment(),
+            NullLogger<PersistentUsageQuotaService>.Instance);
+        var subject = Guid.NewGuid().ToString();
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        Equal(QuotaStatus.Exceeded, service.TryConsumeAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        service.RefundAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult();
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        service.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private static void ImageSignatureValidation()
@@ -178,6 +262,14 @@ public static class TestRunner
     {
         public DateTimeOffset UtcNow { get; set; } = initial;
         public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Development;
+        public string ApplicationName { get; set; } = "OutfitCombination.Api.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }
 

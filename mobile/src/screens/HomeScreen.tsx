@@ -11,14 +11,12 @@ interface Props {
   items: ClothingItem[];
   pendingDraft: ClothingDraft | null;
   pendingQueueCount: number;
-  demoMode: boolean;
   onAdd: (category?: Category) => void;
   onRecommend: () => void;
   onOpen: (item: ClothingItem) => void;
   onDelete: (item: ClothingItem) => Promise<void>;
   onResumeDraft: () => void;
   onSettings: () => void;
-  onModePress: () => void;
   onFavorites: () => void;
   favoriteCount: number;
 }
@@ -64,11 +62,6 @@ export function HomeScreen(props: Props) {
           <Text style={styles.settingsText}>Ayarlar</Text>
         </Pressable>
       </View>
-
-      <Pressable onPress={props.onModePress} style={[styles.modeBadge, props.demoMode ? styles.demoBadge : styles.aiBadge]}>
-        <Text style={styles.modeText}>{props.demoMode ? 'Demo modu · AI kapalı' : 'AI modu · Backend kullanılır'}</Text>
-        <Text style={styles.modeHint}>Değiştirmek için dokun</Text>
-      </Pressable>
 
       <View style={styles.actions}>
         <Text style={styles.prompt}>Bu akşam ne giysem?</Text>
@@ -165,11 +158,6 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 27, fontWeight: '900', marginTop: 3 },
   settings: { minHeight: 44, justifyContent: 'center', paddingLeft: spacing.md },
   settingsText: { color: colors.primary, fontWeight: '700' },
-  modeBadge: { alignSelf: 'flex-start', borderRadius: 16, paddingVertical: 7, paddingHorizontal: 12 },
-  demoBadge: { backgroundColor: '#F3DFC9' },
-  aiBadge: { backgroundColor: colors.primarySoft },
-  modeText: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  modeHint: { color: colors.muted, fontSize: 10, marginTop: 2 },
   actions: { gap: spacing.sm },
   prompt: { color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: 2 },
   actionButton: { width: '100%' },

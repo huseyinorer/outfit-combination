@@ -84,7 +84,7 @@ async function getAccessToken(baseUrl: string, forceRefresh = false, signal?: Ab
   return pending;
 }
 
-export async function authenticatedFetch(
+export async function installationAuthenticatedFetch(
   baseUrl: string,
   path: string,
   init: RequestInit,

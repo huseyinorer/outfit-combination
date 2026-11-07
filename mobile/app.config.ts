@@ -8,6 +8,7 @@ const config: ExpoConfig = {
   name: 'Outfit Combination',
   slug: 'outfit-combination',
   version: appVersion.version,
+  scheme: 'outfitcombination',
   icon: './assets/icon.png',
   orientation: 'default',
   userInterfaceStyle: 'light',
@@ -53,6 +54,7 @@ const config: ExpoConfig = {
     privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL
       ?? 'https://huseyinorer.github.io/outfit-combination/',
     appEnvironment,
+    internalTools: process.env.EXPO_PUBLIC_INTERNAL_TOOLS === 'true' || appEnvironment === 'development',
     eas: {
       projectId: easProjectId,
     },

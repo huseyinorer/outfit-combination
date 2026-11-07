@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, BackHandler, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, BackHandler, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateGate } from './src/components/UpdateGate';
@@ -39,6 +39,15 @@ import { evaluateVersion, type MobileVersionInfo, type VersionDecision } from '.
 import { tactileSuccess } from './src/services/feedback';
 import { createThumbnail, deleteAllStoredImages, deleteStoredImage } from './src/services/imageStorage';
 import { fetchMobileVersion, getCurrentAppVersion } from './src/services/version';
+import {
+  completeInitialAccountSignIn,
+  deleteAccount,
+  ensureAccountForAi,
+  loadAccountState,
+  signInWithGoogle,
+  signOutAccount,
+  type AccountState,
+} from './src/services/accountAuth';
 import { AddClothingScreen } from './src/screens/AddClothingScreen';
 import { EditClothingScreen } from './src/screens/EditClothingScreen';
 import { FavoritesScreen } from './src/screens/FavoritesScreen';
@@ -62,6 +71,7 @@ type Screen =
   | { name: 'onboarding' };
 
 const bundledApiUrl = normalizeApiBaseUrl(String(Constants.expoConfig?.extra?.apiBaseUrl ?? ''));
+const internalToolsEnabled = Constants.expoConfig?.extra?.internalTools === true;
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
@@ -70,8 +80,8 @@ export default function App() {
   const [pendingDraft, setPendingDraftState] = useState<ClothingDraft | null>(null);
   const [pendingQueue, setPendingQueueState] = useState<ClothingDraft[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<ClothingItem | null>(null);
-  const [demoMode, setDemoMode] = useState(true);
   const [aiConsentGranted, setAiConsentGranted] = useState(false);
+  const [account, setAccount] = useState<AccountState>({ enabled: false, user: null, usage: null });
   const [apiUrl, setApiUrl] = useState(bundledApiUrl);
   const [ready, setReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -81,9 +91,19 @@ export default function App() {
   const currentVersion = getCurrentAppVersion();
   const deletedItemRef = useRef<ClothingItem | null>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const versionCheckInFlightRef = useRef(false);
 
   const refresh = async () => setItems(await listClothing());
   const refreshFavorites = async () => setFavorites(await listFavoriteOutfits());
+  const refreshAccount = useCallback(async () => {
+    if (!apiUrl) return;
+    try {
+      const completed = await completeInitialAccountSignIn(apiUrl);
+      setAccount(completed ?? await loadAccountState(apiUrl));
+    } catch {
+      setAccount((current) => current.user ? { ...current, stale: true } : current);
+    }
+  }, [apiUrl]);
 
   const goBack = useCallback(() => {
     if (screen.name === 'results') {
@@ -108,12 +128,11 @@ export default function App() {
           deleteStoredImage(item.thumbnailUri);
           deleteStoredImage(item.cutoutUri);
         }
-        const [storedItems, storedFavorites, draft, queue, storedDemo, storedApi, storedConsent, onboarding] = await Promise.all([
+        const [storedItems, storedFavorites, draft, queue, storedApi, storedConsent, onboarding] = await Promise.all([
           listClothing(),
           listFavoriteOutfits(),
           getPendingDraft(),
           getPendingQueue(),
-          getSetting('demo_mode'),
           getSetting('api_url'),
           getSetting('ai_consent_version'),
           getSetting('onboarding_completed'),
@@ -122,12 +141,15 @@ export default function App() {
         setFavorites(storedFavorites);
         setPendingDraftState(draft);
         setPendingQueueState(queue);
-        setDemoMode(storedDemo === null ? true : storedDemo === 'true');
         setAiConsentGranted(storedConsent === AI_CONSENT_VERSION);
-        const resolvedApiUrl = normalizeApiBaseUrl(storedApi ?? bundledApiUrl);
+        const resolvedApiUrl = internalToolsEnabled
+          ? normalizeApiBaseUrl(storedApi ?? bundledApiUrl)
+          : bundledApiUrl;
         setApiUrl(resolvedApiUrl);
-        if (storedApi !== null && storedApi !== resolvedApiUrl) {
+        if (internalToolsEnabled && storedApi !== null && storedApi !== resolvedApiUrl) {
           await setSetting('api_url', resolvedApiUrl);
+        } else if (!internalToolsEnabled && storedApi !== null) {
+          await deleteSetting('api_url');
         }
         if (onboarding !== 'true' && storedItems.length === 0 && !draft) setScreen({ name: 'onboarding' });
 
@@ -148,20 +170,35 @@ export default function App() {
     start();
   }, []);
 
-  useEffect(() => {
-    if (!ready) return;
-    const versionApiUrl = bundledApiUrl || apiUrl;
+  const checkVersion = useCallback(async () => {
+    if (!ready || versionCheckInFlightRef.current) return;
+    const versionApiUrl = apiUrl || bundledApiUrl;
     if (!versionApiUrl) return;
 
-    fetchMobileVersion(versionApiUrl)
-      .then((info) => {
-        setVersionInfo(info);
-        setVersionDecision(evaluateVersion(currentVersion, info));
-      })
-      .catch(() => {
-        // Sürüm sunucusu kapalıyken demo ve yerel özellikler kullanılabilsin.
-      });
+    versionCheckInFlightRef.current = true;
+    try {
+      const info = await fetchMobileVersion(versionApiUrl);
+      setVersionInfo(info);
+      setVersionDecision(evaluateVersion(currentVersion, info));
+    } catch {
+      // Sürüm sunucusu kapalıyken elle kayıt ve yerel kombin özellikleri çalışmaya devam eder.
+    } finally {
+      versionCheckInFlightRef.current = false;
+    }
   }, [apiUrl, currentVersion, ready]);
+
+  useEffect(() => {
+    if (!ready) return undefined;
+    void checkVersion();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void checkVersion();
+    });
+    return () => subscription.remove();
+  }, [checkVersion, ready]);
+
+  useEffect(() => {
+    if (ready && apiUrl) void refreshAccount();
+  }, [apiUrl, ready, refreshAccount]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -252,15 +289,12 @@ export default function App() {
     }
   };
 
-  const saveSettings = async (nextDemo: boolean, nextApiUrl: string) => {
+  const saveApiUrl = async (nextApiUrl: string) => {
+    if (!internalToolsEnabled) return;
     const normalizedApiUrl = normalizeApiBaseUrl(nextApiUrl);
-    await Promise.all([
-      setSetting('demo_mode', String(nextDemo)),
-      setSetting('api_url', normalizedApiUrl),
-    ]);
-    setDemoMode(nextDemo);
+    await setSetting('api_url', normalizedApiUrl);
     setApiUrl(normalizedApiUrl);
-    tactileSuccess('Ayarlar kaydedildi.');
+    tactileSuccess('API adresi kaydedildi.');
     setScreen({ name: 'home' });
   };
 
@@ -275,12 +309,8 @@ export default function App() {
   };
 
   const revokeAiConsent = async () => {
-    await Promise.all([
-      deleteSetting('ai_consent_version'),
-      setSetting('demo_mode', 'true'),
-    ]);
+    await deleteSetting('ai_consent_version');
     setAiConsentGranted(false);
-    setDemoMode(true);
     tactileSuccess('AI paylaşım onayı geri çekildi.');
   };
 
@@ -313,6 +343,44 @@ export default function App() {
     });
   };
 
+  const requestAiAccess = async (): Promise<boolean> => {
+    if (!await requestAiConsent()) return false;
+    try {
+      const nextAccount = await ensureAccountForAi(apiUrl);
+      setAccount(nextAccount);
+      return !nextAccount.enabled || Boolean(nextAccount.user);
+    } catch (error) {
+      Alert.alert('Google ile giriş yapılamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      return false;
+    }
+  };
+
+  const connectAccount = async () => {
+    try {
+      const nextAccount = await signInWithGoogle(apiUrl);
+      setAccount(nextAccount);
+      tactileSuccess('Google hesabın bağlandı.');
+    } catch (error) {
+      Alert.alert('Google ile giriş yapılamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+    }
+  };
+
+  const disconnectAccount = async () => {
+    await signOutAccount();
+    setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
+    tactileSuccess('Bu cihazdaki hesap oturumu kapatıldı.');
+  };
+
+  const removeAccount = async () => {
+    try {
+      await deleteAccount(apiUrl);
+      setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
+      tactileSuccess('Hesap profilin sunucudan silindi.');
+    } catch (error) {
+      Alert.alert('Hesap silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+    }
+  };
+
   const deleteAllLocalData = async () => {
     if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
     deleteTimerRef.current = null;
@@ -327,8 +395,8 @@ export default function App() {
     setFavorites([]);
     setPendingDraftState(null);
     setPendingQueueState([]);
-    setDemoMode(true);
     setAiConsentGranted(false);
+    setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
     setApiUrl(bundledApiUrl);
     setScreen({ name: 'home' });
     if (imageCleanupFailed) {
@@ -369,7 +437,6 @@ export default function App() {
       content = (
         <AddClothingScreen
           apiUrl={apiUrl}
-          demoMode={demoMode}
           initialCategory={screen.category}
           initialDraft={screen.resume ? pendingDraft : null}
           initialQueue={screen.resume ? pendingQueue : []}
@@ -377,7 +444,14 @@ export default function App() {
           onPersistQueue={persistQueue}
           onSave={saveNewItem}
           onComplete={() => setScreen({ name: 'home' })}
-          onRequestAiConsent={requestAiConsent}
+          onRequestAiAccess={requestAiAccess}
+          onAiUsageChanged={() => void refreshAccount()}
+          analysisRemaining={account.user && account.usage
+            ? Math.max(0, Math.min(
+              account.usage.dailyAnalysisLimit - account.usage.dailyAnalysisUsed,
+              account.usage.monthlyAnalysisLimit - account.usage.monthlyAnalysisUsed,
+            ))
+            : undefined}
           onBack={goBack}
         />
       );
@@ -396,9 +470,15 @@ export default function App() {
       content = (
         <RecommendScreen
           items={items}
-          demoMode={demoMode}
           apiUrl={apiUrl}
-          onRequestAiConsent={requestAiConsent}
+          onRequestAiAccess={requestAiAccess}
+          onAiUsageChanged={() => void refreshAccount()}
+          outfitRemaining={account.user && account.usage
+            ? Math.max(0, Math.min(
+              account.usage.dailyOutfitLimit - account.usage.dailyOutfitUsed,
+              account.usage.monthlyOutfitLimit - account.usage.monthlyOutfitUsed,
+            ))
+            : undefined}
           onBack={goBack}
           onAddCategory={(category) => setScreen({ name: 'add', category })}
           onResults={(suggestions, warning, preferences) => setScreen({ name: 'results', suggestions, warning, preferences })}
@@ -431,10 +511,16 @@ export default function App() {
     case 'settings':
       content = (
         <SettingsScreen
-          demoMode={demoMode}
           apiUrl={apiUrl}
           aiConsentGranted={aiConsentGranted}
-          onSave={saveSettings}
+          currentVersion={currentVersion}
+          internalToolsEnabled={internalToolsEnabled}
+          account={account}
+          onSaveApiUrl={saveApiUrl}
+          onSignIn={connectAccount}
+          onSignOut={disconnectAccount}
+          onDeleteAccount={removeAccount}
+          onRefreshAccount={refreshAccount}
           onGrantAiConsent={grantAiConsent}
           onRevokeAiConsent={revokeAiConsent}
           onDeleteAllData={deleteAllLocalData}
@@ -455,14 +541,12 @@ export default function App() {
           items={items}
           pendingDraft={pendingDraft}
           pendingQueueCount={pendingQueue.length}
-          demoMode={demoMode}
           onAdd={(category) => setScreen({ name: 'add', category })}
           onRecommend={() => setScreen({ name: 'recommend' })}
           onOpen={(item) => setScreen({ name: 'edit', item })}
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onSettings={() => setScreen({ name: 'settings' })}
-          onModePress={() => setScreen({ name: 'settings' })}
           onFavorites={() => setScreen({ name: 'favorites' })}
           favoriteCount={favorites.length}
         />

@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,7 +38,6 @@ const guidance: Record<Category, string> = {
 
 interface Props {
   apiUrl: string;
-  demoMode: boolean;
   initialCategory?: Category;
   initialDraft: ClothingDraft | null;
   initialQueue: ClothingDraft[];
@@ -45,7 +45,9 @@ interface Props {
   onPersistQueue: (queue: ClothingDraft[]) => Promise<void>;
   onSave: (item: ClothingItem) => Promise<void>;
   onComplete: () => void;
-  onRequestAiConsent: () => Promise<boolean>;
+  onRequestAiAccess: () => Promise<boolean>;
+  onAiUsageChanged: () => void;
+  analysisRemaining?: number;
   onBack: () => void;
 }
 
@@ -56,7 +58,6 @@ export function AddClothingScreen(props: Props) {
   const [category, setCategory] = useState<Category | null>(props.initialDraft?.category ?? props.initialCategory ?? null);
   const [busy, setBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [manualMode, setManualMode] = useState(props.demoMode || Boolean(props.initialDraft?.analysisError));
   const [analysisElapsed, setAnalysisElapsed] = useState(0);
   const [learnedApplied, setLearnedApplied] = useState(false);
   const [lastSource, setLastSource] = useState<'camera' | 'gallery'>('camera');
@@ -65,6 +66,8 @@ export function AddClothingScreen(props: Props) {
   const hasPhoto = Boolean(draft?.photoUri);
   const wide = width >= 900;
   const batchRemaining = (draft ? 1 : 0) + queue.length;
+  const analysisMode = draft?.analysisMode
+    ?? (draft?.aiAttributes || draft?.analysisError ? 'ai' : 'manual');
 
   useEffect(() => {
     getSetting('last_photo_source').then((value) => {
@@ -91,15 +94,8 @@ export function AddClothingScreen(props: Props) {
   };
 
   const runAnalysis = async (current: ClothingDraft) => {
-    if (props.demoMode) {
-      const next = { ...current, analysisError: 'Demo modunda görsel analizi yapılmaz. Alanları elle tamamla.' };
-      setManualMode(true);
-      await persist(next);
-      return;
-    }
-    if (!await props.onRequestAiConsent()) {
-      const next = { ...current, analysisError: 'Fotoğraf AI hizmetine gönderilmedi. Alanları elle tamamlayabilir veya yeniden deneyip onay verebilirsin.' };
-      setManualMode(true);
+    if (!await props.onRequestAiAccess()) {
+      const next: ClothingDraft = { ...current, analysisMode: 'manual', analysisError: null };
       await persist(next);
       return;
     }
@@ -108,9 +104,10 @@ export function AddClothingScreen(props: Props) {
     analysisRequestRef.current = controller;
     setAnalysisElapsed(0);
     setAnalyzing(true);
-    setManualMode(false);
+    const analyzingDraft: ClothingDraft = { ...current, analysisMode: 'ai', analysisError: null };
     try {
-      const result = await analyzeClothing(props.apiUrl, current.category, current.photoUri, controller.signal);
+      await persist(analyzingDraft);
+      const result = await analyzeClothing(props.apiUrl, analyzingDraft.category, analyzingDraft.photoUri, controller.signal);
       const aiAttributes = {
         name: result.name ?? '',
         subType: result.subType ?? '',
@@ -121,7 +118,7 @@ export function AddClothingScreen(props: Props) {
         seasons: result.seasons ?? [],
         description: result.description ?? '',
       };
-      const attributes = applyLearnedCorrections(aiAttributes, await listCorrectionRules(current.category));
+      const attributes = applyLearnedCorrections(aiAttributes, await listCorrectionRules(analyzingDraft.category));
       setLearnedApplied(
         attributes.name !== aiAttributes.name
         || attributes.subType !== aiAttributes.subType
@@ -129,30 +126,29 @@ export function AddClothingScreen(props: Props) {
         || attributes.pattern !== aiAttributes.pattern,
       );
       await persist({
-        ...current,
+        ...analyzingDraft,
         attributes,
         aiAttributes,
         categoryConflict: result.categoryConflict,
         detectedCategory: result.detectedCategory,
         analysisError: null,
+        analysisMode: 'ai',
       });
-      setManualMode(false);
     } catch (error) {
       if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : 'Analiz servisine ulaşılamadı.';
-      await persist({ ...current, analysisError: message });
-      setManualMode(true);
+      await persist({ ...analyzingDraft, analysisMode: 'ai', analysisError: message });
     } finally {
       if (analysisRequestRef.current === controller) analysisRequestRef.current = null;
       setAnalyzing(false);
+      props.onAiUsageChanged();
     }
   };
 
   const continueManually = async (current: ClothingDraft) => {
     analysisRequestRef.current?.abort();
-    setManualMode(true);
     setAnalyzing(false);
-    await persist({ ...current, analysisError: null });
+    await persist({ ...current, analysisMode: 'manual', analysisError: null });
   };
 
   const acceptAsset = async (uri: string) => {
@@ -169,10 +165,10 @@ export function AddClothingScreen(props: Props) {
         categoryConflict: false,
         detectedCategory: null,
         analysisError: null,
+        analysisMode: 'undecided',
       };
       setLearnedApplied(false);
       await persist(next);
-      await runAnalysis(next);
     } catch (error) {
       Alert.alert('Fotoğraf hazırlanamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
     } finally {
@@ -223,6 +219,7 @@ export function AddClothingScreen(props: Props) {
           categoryConflict: false,
           detectedCategory: null,
           analysisError: null,
+          analysisMode: 'undecided',
         });
       }
       const [first, ...remaining] = prepared;
@@ -233,7 +230,6 @@ export function AddClothingScreen(props: Props) {
       setQueue(remaining);
       await props.onPersistQueue(remaining);
       await persist(first);
-      await runAnalysis(first);
     } catch (error) {
       prepared.forEach((item) => deleteStoredImage(item.photoUri));
       Alert.alert('Toplu ekleme hazırlanamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
@@ -309,9 +305,7 @@ export function AddClothingScreen(props: Props) {
       if (next) {
         setCategory(next.category);
         setLearnedApplied(false);
-        setManualMode(props.demoMode || Boolean(next.analysisError));
         await persist(next);
-        await runAnalysis(next);
       } else {
         setDraft(null);
         await props.onPersistDraft(null);
@@ -326,7 +320,7 @@ export function AddClothingScreen(props: Props) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior="padding">
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScreenHeader title={stepTitle} onBack={props.onBack} />
       <ScrollView
         style={styles.scroll}
@@ -375,6 +369,14 @@ export function AddClothingScreen(props: Props) {
         ) : draft ? (
           <>
             {batchRemaining > 1 ? <Notice>Toplu ekleme kuyruğu: bu parçayla birlikte {batchRemaining} fotoğraf kaldı.</Notice> : null}
+            {analysisMode === 'undecided' ? (
+              <Notice>
+                Fotoğrafın hazır. AI ile özellikleri otomatik çıkarabilir veya fotoğrafı göndermeden alanları ücretsiz olarak elle doldurabilirsin.
+              </Notice>
+            ) : null}
+            {analysisMode === 'undecided' && props.analysisRemaining === 0 ? (
+              <Notice tone="error">AI fotoğraf analizi hakkın doldu. Fotoğrafın güvende; elle doldurarak ücretsiz devam edebilirsin.</Notice>
+            ) : null}
             <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
               <View style={styles.mediaColumn}>
                 <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
@@ -394,12 +396,14 @@ export function AddClothingScreen(props: Props) {
                 ) : null}
                 {learnedApplied ? <Notice>Önceki düzeltmelerine göre bazı AI alanları telefonda otomatik düzeltildi.</Notice> : null}
                 {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
-                {draft.analysisError && !props.demoMode ? (
+                {draft.analysisError ? (
                   <SecondaryButton title="Yeniden dene" onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
                 ) : null}
               </View>
               <View style={styles.formColumn}>
-                {(manualMode || !analyzing) ? (
+                {analysisMode === 'undecided' ? (
+                  <Notice>Devam etmek için aşağıdan AI analizini veya elle doldurmayı seç.</Notice>
+                ) : !analyzing ? (
                   <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
                 ) : (
                   <Notice>Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.</Notice>
@@ -413,12 +417,25 @@ export function AddClothingScreen(props: Props) {
       </ScrollView>
       {draft ? (
         <StickyFooter>
-          {analyzing ? (
+          {analysisMode === 'undecided' ? (
+            <>
+              <SecondaryButton title="Elle doldur · Ücretsiz" onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
+              <PrimaryButton
+                title={`AI ile analiz et${props.analysisRemaining === undefined ? '' : ` · ${props.analysisRemaining} hak`}`}
+                onPress={() => void runAnalysis(draft)}
+                loading={analyzing}
+                disabled={busy || props.analysisRemaining === 0}
+                style={styles.footerButton}
+              />
+            </>
+          ) : analyzing ? (
             <SecondaryButton title="Beklemeden elle devam et" onPress={() => continueManually(draft)} style={styles.footerButton} />
           ) : (
             <SecondaryButton title="Fotoğrafı değiştir" onPress={() => openSource(lastSource)} disabled={busy} style={styles.footerButton} />
           )}
-          <PrimaryButton title="Kaydet" onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
+          {analysisMode !== 'undecided' ? (
+            <PrimaryButton title="Kaydet" onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
+          ) : null}
         </StickyFooter>
       ) : null}
     </KeyboardAvoidingView>

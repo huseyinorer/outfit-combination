@@ -10,7 +10,7 @@ import type {
   OutfitResult,
   OutfitSuggestion,
 } from '../domain/types';
-import { authenticatedFetch } from './installationAuth';
+import { accountAuthenticatedFetch } from './accountAuth';
 
 interface AnalyzeResponse extends ClothingAttributes {
   categoryConflict: boolean;
@@ -78,7 +78,7 @@ export async function analyzeClothing(
   // Render Free can take about a minute to wake after an idle period.
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await authenticatedFetch(baseUrl, '/api/analyze', {
+    const response = await accountAuthenticatedFetch(baseUrl, '/api/analyze', {
       method: 'POST',
       body: form,
     }, controller.signal);
@@ -119,7 +119,7 @@ export async function requestOutfits(
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     // Bu gövde bilinçli olarak fotoğraf, URI, dosya yolu ve base64 içermez.
-    const response = await authenticatedFetch(baseUrl, '/api/outfits', {
+    const response = await accountAuthenticatedFetch(baseUrl, '/api/outfits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preferences, wardrobe: wardrobe.map(toApiItem) }),

@@ -22,6 +22,6 @@ services:
       - key: MobileUpdate__MinimumVersion
         value: 1.0.0
       - key: MobileUpdate__ForceLatest
-        value: "true"
+        value: "false"
       - key: MobileUpdate__AndroidDownloadUrl
         sync: false

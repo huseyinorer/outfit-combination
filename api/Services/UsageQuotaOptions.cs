@@ -23,3 +23,13 @@ public enum QuotaStatus
 }
 
 public sealed record QuotaDecision(QuotaStatus Status, int DailyUsed = 0, int MonthlyUsed = 0);
+
+public sealed record UsageSnapshot(
+    int DailyAnalysisUsed,
+    int DailyAnalysisLimit,
+    int MonthlyAnalysisUsed,
+    int MonthlyAnalysisLimit,
+    int DailyOutfitUsed,
+    int DailyOutfitLimit,
+    int MonthlyOutfitUsed,
+    int MonthlyOutfitLimit);

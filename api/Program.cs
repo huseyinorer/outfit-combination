@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using OutfitCombination.Api.Models;
 using OutfitCombination.Api.Services;
 using System.Globalization;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,10 +18,12 @@ if (int.TryParse(Environment.GetEnvironmentVariable("PORT"), out var renderPort)
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
 builder.Services.Configure<MobileUpdateOptions>(builder.Configuration.GetSection("MobileUpdate"));
 builder.Services.Configure<AppSecurityOptions>(builder.Configuration.GetSection("AppSecurity"));
+builder.Services.Configure<AccountAuthOptions>(builder.Configuration.GetSection("AccountAuth"));
 builder.Services.Configure<UsageQuotaOptions>(builder.Configuration.GetSection("UsageQuota"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<InstallationTokenService>();
 builder.Services.AddSingleton<PersistentUsageQuotaService>();
+builder.Services.AddSingleton<AccountStore>();
 builder.Services.AddSingleton<MobileVersionService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -29,16 +32,26 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 15 * 1024 * 1024);
 builder.Services.AddHttpClient<OpenAiWardrobeService>(client => client.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddHttpClient<GoogleOAuthService>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddCors(options => options.AddPolicy("lan", policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var securityConfig = builder.Configuration.GetSection("AppSecurity").Get<AppSecurityOptions>() ?? new AppSecurityOptions();
+var accountConfig = builder.Configuration.GetSection("AccountAuth").Get<AccountAuthOptions>() ?? new AccountAuthOptions();
 if (!builder.Environment.IsDevelopment()
     && System.Text.Encoding.UTF8.GetByteCount(securityConfig.TokenSigningKey?.Trim() ?? string.Empty) < 32)
 {
     throw new InvalidOperationException(
         "Production ortamında AppSecurity:TokenSigningKey en az 32 bayt olarak ayarlanmalıdır.");
 }
+if (accountConfig.PartiallyConfigured)
+    throw new InvalidOperationException(
+        "AccountAuth etkinleştirilecekse GoogleClientId, GoogleClientSecret ve CallbackUrl birlikte ayarlanmalıdır.");
+if (!builder.Environment.IsDevelopment()
+    && accountConfig.Enabled
+    && (!Uri.TryCreate(accountConfig.CallbackUrl, UriKind.Absolute, out var callbackUri)
+        || callbackUri.Scheme != Uri.UriSchemeHttps))
+    throw new InvalidOperationException("Production AccountAuth:CallbackUrl HTTPS olmalıdır.");
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -64,13 +77,25 @@ builder.Services.AddRateLimiter(options =>
             }));
     options.AddPolicy("ai", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            context.Items.TryGetValue(InstallationTokenService.ContextItemKey, out var value)
-                ? $"ai:{value}"
+            context.Items.TryGetValue(InstallationTokenService.UserContextItemKey, out var userValue)
+                ? $"ai:user:{userValue}"
+                : context.Items.TryGetValue(InstallationTokenService.ContextItemKey, out var value)
+                ? $"ai:installation:{value}"
                 : $"ai:{context.Connection.RemoteIpAddress}",
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = Math.Clamp(securityConfig.AiPermitLimit, 3, 300),
                 Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("account-auth", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            $"account:{context.Connection.RemoteIpAddress}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromHours(1),
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
@@ -81,9 +106,13 @@ app.UseCors("lan");
 
 app.Use(async (context, next) =>
 {
-    var protectedPath = context.Request.Path.StartsWithSegments("/api/analyze")
+    var aiPath = context.Request.Path.StartsWithSegments("/api/analyze")
         || context.Request.Path.StartsWithSegments("/api/outfits");
-    if (!protectedPath)
+    var accountExchangePath = context.Request.Path.StartsWithSegments("/api/account/google/start")
+        || context.Request.Path.StartsWithSegments("/api/account/google/complete");
+    var accountPath = context.Request.Path.StartsWithSegments("/api/account/me")
+        || (context.Request.Method == HttpMethods.Delete && context.Request.Path.Equals("/api/account"));
+    if (!aiPath && !accountExchangePath && !accountPath)
     {
         await next();
         return;
@@ -94,6 +123,30 @@ app.Use(async (context, next) =>
         ? authorization[7..].Trim()
         : string.Empty;
     var tokens = context.RequestServices.GetRequiredService<InstallationTokenService>();
+
+    if ((aiPath && accountConfig.Enabled) || accountPath)
+    {
+        if (tokens.TryValidateUser(bearer, out var userId, out var userInstallationId))
+        {
+            var accounts = context.RequestServices.GetRequiredService<AccountStore>();
+            if (await accounts.GetUserAsync(userId, context.RequestAborted) is not null)
+            {
+                context.Items[InstallationTokenService.UserContextItemKey] = userId;
+                context.Items[InstallationTokenService.ContextItemKey] = userInstallationId;
+                await next();
+                return;
+            }
+        }
+
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            code = "account_session_required",
+            message = "AI özelliklerini kullanmak için Google hesabınla giriş yap."
+        });
+        return;
+    }
+
     if (tokens.TryValidate(bearer, out var installationId))
     {
         context.Items[InstallationTokenService.ContextItemKey] = installationId;
@@ -111,10 +164,12 @@ app.Use(async (context, next) =>
 
 app.UseRateLimiter();
 
-app.MapGet("/health", (PersistentUsageQuotaService quota) => Results.Ok(new
+app.MapGet("/health", (PersistentUsageQuotaService quota, AccountStore accounts) => Results.Ok(new
 {
     status = "ok",
-    quotaPersistence = quota.IsPersistent ? "postgres" : "not_configured"
+    quotaPersistence = quota.IsPersistent ? "postgres" : "not_configured",
+    accountPersistence = accounts.IsPersistent ? "postgres" : "not_configured",
+    accountAuth = accountConfig.Enabled ? "enabled" : "disabled"
 }));
 
 app.MapGet("/api/version", (MobileVersionService versions, IOptions<MobileUpdateOptions> options) =>
@@ -148,6 +203,135 @@ app.MapPost("/api/installations/register", (
     });
 }).RequireRateLimiting("installation-registration");
 
+app.MapGet("/api/account/config", (IOptions<AccountAuthOptions> options) => Results.Ok(new
+{
+    enabled = options.Value.Enabled
+}));
+
+app.MapPost("/api/account/google/start", async (
+    HttpContext context,
+    AccountStore accounts,
+    GoogleOAuthService google,
+    IOptions<AccountAuthOptions> options,
+    CancellationToken cancellationToken) =>
+{
+    if (!options.Value.Enabled)
+        return Results.Json(new { message = "Google hesabı henüz yapılandırılmamış." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    if (!accounts.IsPersistent)
+        return Results.Json(new { message = "Hesap veritabanına şu anda ulaşılamıyor." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    var lifetime = TimeSpan.FromMinutes(Math.Clamp(options.Value.AttemptLifetimeMinutes, 5, 30));
+    var attempt = await accounts.CreateAttemptAsync(InstallationId(context), lifetime, cancellationToken);
+    if (attempt is null)
+        return Results.Json(new { message = "Google oturumu başlatılamadı." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    return Results.Ok(new { authorizationUrl = google.BuildAuthorizationUrl(attempt.State) });
+}).RequireRateLimiting("account-auth");
+
+app.MapGet("/api/account/google/callback", async (
+    string? code,
+    string? state,
+    string? error,
+    HttpResponse response,
+    AccountStore accounts,
+    GoogleOAuthService google,
+    IOptions<AccountAuthOptions> options,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    response.Headers.Pragma = "no-cache";
+    response.Headers["Referrer-Policy"] = "no-referrer";
+    response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+    if (!options.Value.Enabled)
+        return AccountReturnPage(options.Value.AppReturnScheme, false, "not_configured", "Google oturumu yapılandırılmamış.");
+
+    var installationId = string.IsNullOrWhiteSpace(state)
+        ? null
+        : await accounts.ConsumeAttemptAsync(state, cancellationToken);
+    if (installationId is null)
+        return AccountReturnPage(options.Value.AppReturnScheme, false, "invalid_state", "Oturum isteğinin süresi doldu. Uygulamadan yeniden dene.");
+    if (!string.IsNullOrWhiteSpace(error))
+        return AccountReturnPage(options.Value.AppReturnScheme, false, "cancelled", "Google ile giriş iptal edildi.");
+    if (string.IsNullOrWhiteSpace(code) || code.Length > 4096)
+        return AccountReturnPage(options.Value.AppReturnScheme, false, "invalid_code", "Google geçerli bir oturum kodu döndürmedi.");
+
+    try
+    {
+        var profile = await google.ExchangeAsync(code, cancellationToken);
+        var user = await accounts.UpsertGoogleUserAsync(
+            profile.Subject,
+            profile.Email,
+            profile.DisplayName,
+            profile.PictureUrl,
+            cancellationToken);
+        var exchangeCode = await accounts.CreateExchangeCodeAsync(
+            user.Id,
+            installationId.Value,
+            TimeSpan.FromMinutes(2),
+            cancellationToken);
+        return AccountReturnPage(options.Value.AppReturnScheme, true, exchangeCode, "Giriş tamamlandı. Uygulamaya dönebilirsin.");
+    }
+    catch (Exception callbackError) when (callbackError is GoogleOAuthException or HttpRequestException or JsonException or Npgsql.NpgsqlException)
+    {
+        app.Logger.LogWarning(callbackError, "Google hesap dönüşü tamamlanamadı");
+        return AccountReturnPage(options.Value.AppReturnScheme, false, "exchange_failed", "Google ile giriş tamamlanamadı. Uygulamadan yeniden dene.");
+    }
+}).RequireRateLimiting("account-auth");
+
+app.MapPost("/api/account/google/complete", async (
+    AccountExchangeRequest request,
+    HttpContext context,
+    HttpResponse response,
+    AccountStore accounts,
+    InstallationTokenService tokens,
+    PersistentUsageQuotaService quota,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 256)
+        return Results.BadRequest(new { message = "Geçerli bir oturum tamamlama kodu gerekli." });
+    var installationId = InstallationId(context);
+    var user = await accounts.ConsumeExchangeCodeAsync(request.Code, installationId, cancellationToken);
+    if (user is null)
+        return Results.BadRequest(new { message = "Oturum kodu geçersiz, kullanılmış veya süresi dolmuş." });
+    var issued = tokens.IssueUser(user.Id, installationId);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), cancellationToken);
+    response.Headers.CacheControl = "no-store";
+    return Results.Ok(new
+    {
+        accessToken = issued.AccessToken,
+        expiresAt = issued.ExpiresAt,
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        usage
+    });
+}).RequireRateLimiting("account-auth");
+
+app.MapGet("/api/account/me", async (
+    HttpContext context,
+    HttpResponse response,
+    AccountStore accounts,
+    PersistentUsageQuotaService quota,
+    CancellationToken cancellationToken) =>
+{
+    var userId = UserId(context);
+    var user = await accounts.GetUserAsync(userId, cancellationToken);
+    if (user is null) return Results.NotFound(new { message = "Kullanıcı hesabı bulunamadı." });
+    var usage = await quota.GetSnapshotAsync(userId.ToString(), cancellationToken);
+    response.Headers.CacheControl = "no-store";
+    return Results.Ok(new
+    {
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        usage
+    });
+});
+
+app.MapDelete("/api/account", async (
+    HttpContext context,
+    AccountStore accounts,
+    CancellationToken cancellationToken) =>
+{
+    var deleted = await accounts.DeleteUserAsync(UserId(context), cancellationToken);
+    return deleted ? Results.NoContent() : Results.NotFound(new { message = "Kullanıcı hesabı bulunamadı." });
+});
+
 app.MapPost("/api/analyze", async (
     HttpRequest request,
     OpenAiWardrobeService ai,
@@ -173,8 +357,9 @@ app.MapPost("/api/analyze", async (
 
     try
     {
+        var usageSubject = UsageSubject(request.HttpContext);
         var quotaDecision = await quota.TryConsumeAsync(
-            InstallationId(request.HttpContext),
+            usageSubject,
             AiOperation.Analysis,
             cancellationToken);
         if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
@@ -185,11 +370,13 @@ app.MapPost("/api/analyze", async (
     }
     catch (AiServiceException error)
     {
+        await quota.RefundAsync(UsageSubject(request.HttpContext), AiOperation.Analysis, CancellationToken.None);
         app.Logger.LogWarning(error, "Kıyafet analizi başarısız");
         return Results.Json(new { message = error.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (InvalidImageException error)
     {
+        await quota.RefundAsync(UsageSubject(request.HttpContext), AiOperation.Analysis, CancellationToken.None);
         return Results.BadRequest(new { message = error.Message });
     }
 }).RequireRateLimiting("ai");
@@ -214,8 +401,9 @@ app.MapPost("/api/outfits", async (
     if (missing.Count > 0)
         return Results.BadRequest(new { code = "missing_category", missingCategories = missing, message = "Kombin için her ana kategoriden en az bir parça gerekli." });
 
+    var usageSubject = UsageSubject(context);
     var quotaDecision = await quota.TryConsumeAsync(
-        InstallationId(context),
+        usageSubject,
         AiOperation.Outfit,
         cancellationToken);
     if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
@@ -223,12 +411,14 @@ app.MapPost("/api/outfits", async (
     var target = Math.Min(3, OutfitRules.PossibleCount(request.Wardrobe));
     var collected = new List<OutfitSuggestion>();
     string? warning = null;
+    var aiResponded = false;
 
     for (var attempt = 0; attempt < ai.MaxAttempts && OutfitRules.ValidateAi(request.Wardrobe, collected).Count < target; attempt++)
     {
         try
         {
             collected.AddRange(await ai.SuggestAsync(request, cancellationToken));
+            aiResponded = true;
         }
         catch (AiServiceException error)
         {
@@ -237,6 +427,9 @@ app.MapPost("/api/outfits", async (
             break;
         }
     }
+
+    if (!aiResponded && warning is not null)
+        await quota.RefundAsync(usageSubject, AiOperation.Outfit, CancellationToken.None);
 
     var validAi = OutfitRules.ValidateAi(request.Wardrobe, collected);
     var completed = OutfitRules.Complete(request, validAi);
@@ -251,12 +444,66 @@ static string InstallationId(HttpContext context) =>
     context.Items[InstallationTokenService.ContextItemKey]?.ToString()
     ?? throw new InvalidOperationException("Kurulum kimliği doğrulanmadı.");
 
+static Guid UserId(HttpContext context) =>
+    context.Items[InstallationTokenService.UserContextItemKey] is Guid userId && userId != Guid.Empty
+        ? userId
+        : throw new InvalidOperationException("Kullanıcı oturumu doğrulanmadı.");
+
+static string UsageSubject(HttpContext context) =>
+    context.Items[InstallationTokenService.UserContextItemKey]?.ToString()
+    ?? InstallationId(context);
+
+static IResult AccountReturnPage(string configuredScheme, bool success, string value, string message)
+{
+    var scheme = IsValidScheme(configuredScheme) ? configuredScheme.Trim() : "outfitcombination";
+    var target = success
+        ? $"{scheme}://auth?code={Uri.EscapeDataString(value)}"
+        : $"{scheme}://auth?error={Uri.EscapeDataString(value)}";
+    var targetJson = JsonSerializer.Serialize(target);
+    var safeTarget = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(target);
+    var safeMessage = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(message);
+    var html = $$"""
+        <!doctype html>
+        <html lang="tr">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Outfit Combination</title>
+          <style>
+            body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f7f3ea; color: #25231f; font-family: system-ui, sans-serif; }
+            main { width: min(420px, calc(100% - 40px)); padding: 28px; border-radius: 24px; background: #fffdf8; box-shadow: 0 12px 40px rgba(37,35,31,.12); }
+            h1 { margin: 0 0 12px; font-size: 24px; }
+            p { line-height: 1.55; color: #666158; }
+            a { display: block; margin-top: 20px; padding: 15px 18px; border-radius: 14px; background: #345c45; color: white; text-align: center; text-decoration: none; font-weight: 800; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>{{(success ? "Giriş tamamlandı" : "Giriş tamamlanamadı")}}</h1>
+            <p>{{safeMessage}}</p>
+            <a href="{{safeTarget}}">Uygulamaya dön</a>
+          </main>
+          <script>window.location.replace({{targetJson}});</script>
+        </body>
+        </html>
+        """;
+    return Results.Content(html, "text/html; charset=utf-8");
+}
+
+static bool IsValidScheme(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return false;
+    var scheme = value.Trim();
+    return char.IsAsciiLetter(scheme[0])
+        && scheme.All(character => char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.');
+}
+
 static IResult? QuotaError(QuotaDecision decision) => decision.Status switch
 {
     QuotaStatus.Exceeded => Results.Json(new
     {
         code = "ai_quota_exceeded",
-        message = "Bu cihaz için AI kullanım kotası doldu. Yerel özellikleri kullanabilir veya kota yenilendiğinde tekrar deneyebilirsin.",
+        message = "AI kullanım hakkın doldu. Yerel özellikleri kullanabilir veya hakların yenilendiğinde tekrar deneyebilirsin.",
         dailyUsed = decision.DailyUsed,
         monthlyUsed = decision.MonthlyUsed
     }, statusCode: StatusCodes.Status429TooManyRequests),

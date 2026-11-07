@@ -70,3 +70,5 @@ public sealed record OutfitResponse(
 
 public sealed record InstallationRegistration(string InstallationId, string? AppVersion);
 
+public sealed record AccountExchangeRequest(string Code);
+

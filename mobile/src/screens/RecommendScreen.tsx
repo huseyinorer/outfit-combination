@@ -33,10 +33,11 @@ const questions = [
 
 interface Props {
   items: ClothingItem[];
-  demoMode: boolean;
   apiUrl: string;
   onBack: () => void;
-  onRequestAiConsent: () => Promise<boolean>;
+  onRequestAiAccess: () => Promise<boolean>;
+  onAiUsageChanged: () => void;
+  outfitRemaining?: number;
   onAddCategory: (category: Category) => void;
   onResults: (
     suggestions: OutfitSuggestion[],
@@ -64,26 +65,24 @@ export function RecommendScreen(props: Props) {
     return () => clearInterval(timer);
   }, [busy]);
 
-  const submit = async () => {
+  const submitLocal = () => {
+    if (busy || missing.length > 0) return;
+    setError(null);
+    props.onResults(
+      completeSuggestions(props.items, preferences),
+      'Kombinler fotoğraf ve özelliklerin cihazından gönderilmeden yerel kurallarla hazırlandı.',
+      preferences,
+    );
+  };
+
+  const submitAi = async () => {
     if (busy || missing.length > 0) return;
     setBusy(true);
     setElapsed(0);
     setError(null);
     try {
-      if (props.demoMode) {
-        props.onResults(
-          completeSuggestions(props.items, preferences),
-          'Demo modu: kombinler telefondaki yerel kurallarla hazırlandı.',
-          preferences,
-        );
-        return;
-      }
-      if (!await props.onRequestAiConsent()) {
-        props.onResults(
-          completeSuggestions(props.items, preferences),
-          'AI paylaşım onayı verilmedi; kombinler tamamen telefonda hazırlandı.',
-          preferences,
-        );
+      if (!await props.onRequestAiAccess()) {
+        setError('AI kullanılmadı. İstersen ücretsiz yerel öneriyi seçebilirsin.');
         return;
       }
       try {
@@ -106,6 +105,7 @@ export function RecommendScreen(props: Props) {
       }
     } finally {
       setBusy(false);
+      props.onAiUsageChanged();
     }
   };
 
@@ -149,10 +149,13 @@ export function RecommendScreen(props: Props) {
                 <Notice>
                   {elapsed < 5
                     ? `Seçimlerin hazırlanıyor · ${elapsed} sn`
-                    : `AI ve ücretsiz backend yanıtı bekleniyor · ${elapsed} sn. Ulaşılamazsa yerel kombinler otomatik gösterilecek.`}
+                    : `AI yanıtı bekleniyor · ${elapsed} sn. Ulaşılamazsa yerel kombinler otomatik gösterilecek.`}
                 </Notice>
               ) : null}
               {error ? <Notice tone="error">{error}</Notice> : null}
+              {props.outfitRemaining === 0 ? (
+                <Notice tone="error">AI kombin hakkın doldu. Yerel öneri ücretsiz olarak kullanılabilir.</Notice>
+              ) : null}
               <Text style={styles.privacy}>Bu istekte sunucuya yalnızca seçimlerin, kıyafet ID’leri ve yazılı özellikler gider; fotoğraf ve dosya yolu gönderilmez.</Text>
             </>
           )}
@@ -160,7 +163,14 @@ export function RecommendScreen(props: Props) {
       </ScrollView>
       {missing.length === 0 ? (
         <StickyFooter>
-          <PrimaryButton title="Kombinleri hazırla" onPress={() => void submit()} loading={busy} style={styles.footerButton} />
+          <SecondaryButton title="Yerel öner · Ücretsiz" onPress={submitLocal} disabled={busy} style={styles.footerButton} />
+          <PrimaryButton
+            title={`AI ile öner${props.outfitRemaining === undefined ? '' : ` · ${props.outfitRemaining} hak`}`}
+            onPress={() => void submitAi()}
+            loading={busy}
+            disabled={props.outfitRemaining === 0}
+            style={styles.footerButton}
+          />
         </StickyFooter>
       ) : null}
     </View>

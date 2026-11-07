@@ -37,6 +37,7 @@ export interface ClothingDraft {
   categoryConflict: boolean;
   detectedCategory: Category | null;
   analysisError: string | null;
+  analysisMode?: 'undecided' | 'ai' | 'manual';
 }
 
 export interface OutfitPreferences {

@@ -7,10 +7,12 @@ using Microsoft.Extensions.Options;
 namespace OutfitCombination.Api.Services;
 
 public sealed record InstallationAccessToken(string AccessToken, DateTimeOffset ExpiresAt);
+public sealed record UserAccessToken(string AccessToken, DateTimeOffset ExpiresAt);
 
 public sealed class InstallationTokenService
 {
     public const string ContextItemKey = "OutfitCombination.InstallationId";
+    public const string UserContextItemKey = "OutfitCombination.UserId";
 
     private readonly byte[] signingKey;
     private readonly TimeProvider timeProvider;
@@ -44,9 +46,19 @@ public sealed class InstallationTokenService
 
         var expiresAt = timeProvider.GetUtcNow().AddDays(tokenLifetimeDays);
         var payload = JsonSerializer.SerializeToUtf8Bytes(new TokenPayload(1, installationId, expiresAt.ToUnixTimeSeconds()));
-        var signature = HMACSHA256.HashData(signingKey, payload);
-        var token = $"{WebEncoders.Base64UrlEncode(payload)}.{WebEncoders.Base64UrlEncode(signature)}";
-        return new InstallationAccessToken(token, expiresAt);
+        return new InstallationAccessToken(Sign(payload), expiresAt);
+    }
+
+    public UserAccessToken IssueUser(Guid userId, string installationId)
+    {
+        if (userId == Guid.Empty) throw new ArgumentException("Geçersiz kullanıcı kimliği.", nameof(userId));
+        if (!Guid.TryParse(installationId, out _))
+            throw new ArgumentException("Geçersiz kurulum kimliği.", nameof(installationId));
+
+        var expiresAt = timeProvider.GetUtcNow().AddDays(tokenLifetimeDays);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            new UserTokenPayload(2, userId, installationId, expiresAt.ToUnixTimeSeconds()));
+        return new UserAccessToken(Sign(payload), expiresAt);
     }
 
     public bool TryValidate(string token, out string installationId)
@@ -77,5 +89,56 @@ public sealed class InstallationTokenService
         }
     }
 
+    public bool TryValidateUser(string token, out Guid userId, out string installationId)
+    {
+        userId = Guid.Empty;
+        installationId = string.Empty;
+        if (!TryReadPayload(token, out var payloadBytes)) return false;
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<UserTokenPayload>(payloadBytes);
+            if (payload is null
+                || payload.Version != 2
+                || payload.UserId == Guid.Empty
+                || !Guid.TryParse(payload.InstallationId, out _)
+                || payload.ExpiresAt <= timeProvider.GetUtcNow().ToUnixTimeSeconds()) return false;
+            userId = payload.UserId;
+            installationId = payload.InstallationId;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private string Sign(byte[] payload)
+    {
+        var signature = HMACSHA256.HashData(signingKey, payload);
+        return $"{WebEncoders.Base64UrlEncode(payload)}.{WebEncoders.Base64UrlEncode(signature)}";
+    }
+
+    private bool TryReadPayload(string token, out byte[] payloadBytes)
+    {
+        payloadBytes = [];
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        var parts = token.Split('.');
+        if (parts.Length != 2) return false;
+        try
+        {
+            payloadBytes = WebEncoders.Base64UrlDecode(parts[0]);
+            var providedSignature = WebEncoders.Base64UrlDecode(parts[1]);
+            var expectedSignature = HMACSHA256.HashData(signingKey, payloadBytes);
+            return CryptographicOperations.FixedTimeEquals(expectedSignature, providedSignature);
+        }
+        catch (FormatException)
+        {
+            payloadBytes = [];
+            return false;
+        }
+    }
+
     private sealed record TokenPayload(int Version, string InstallationId, long ExpiresAt);
+    private sealed record UserTokenPayload(int Version, Guid UserId, string InstallationId, long ExpiresAt);
 }

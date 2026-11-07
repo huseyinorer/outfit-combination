@@ -9,7 +9,7 @@ export function getCurrentAppVersion(): string {
 
 export async function fetchMobileVersion(
   baseUrl: string,
-  timeoutMs = 8_000,
+  timeoutMs = 90_000,
 ): Promise<MobileVersionInfo> {
   const cleanUrl = cleanBaseUrl(baseUrl);
   if (!cleanUrl) throw new Error('Sürüm kontrolü için API adresi ayarlanmamış.');
