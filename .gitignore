@@ -30,3 +30,4 @@ api/**/obj/
 .DS_Store
 Thumbs.db
 .docker-codex/
+.codex-review/

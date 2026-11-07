@@ -8,12 +8,17 @@ const config: ExpoConfig = {
   name: 'Outfit Combination',
   slug: 'outfit-combination',
   version: appVersion.version,
+  icon: './assets/icon.png',
   orientation: 'default',
   userInterfaceStyle: 'light',
   android: {
     package: 'com.krofosyonel.outfitcombination',
     permissions: ['CAMERA', 'READ_MEDIA_IMAGES'],
     softwareKeyboardLayoutMode: 'resize',
+    adaptiveIcon: {
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#F7F3EA',
+    },
   },
   plugins: [
     'expo-updates',

@@ -79,7 +79,7 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.1.0", new MobileVersionService().LatestVersion);
+        Equal("1.1.1", new MobileVersionService().LatestVersion);
     }
 
     private static void ShortClothingName()

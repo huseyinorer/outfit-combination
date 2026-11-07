@@ -167,7 +167,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.1.0`. Increment both files together for the next native release.
+The current native app version is `1.1.1`. Increment both files together for the next native release.
 
 ## Tests
 
