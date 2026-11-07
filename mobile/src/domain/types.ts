@@ -22,6 +22,7 @@ export interface ClothingItem extends ClothingAttributes {
   id: string;
   category: Category;
   photoUri: string;
+  thumbnailUri: string | null;
   cutoutUri: string | null;
   createdAt: string;
   updatedAt: string;
@@ -32,6 +33,7 @@ export interface ClothingDraft {
   category: Category;
   photoUri: string;
   attributes: ClothingAttributes;
+  aiAttributes?: ClothingAttributes | null;
   categoryConflict: boolean;
   detectedCategory: Category | null;
   analysisError: string | null;
@@ -61,6 +63,14 @@ export interface OutfitResult {
   suggestions: OutfitSuggestion[];
   usedFallback: boolean;
   warning?: string;
+}
+
+export interface CorrectionRule {
+  category: Category;
+  field: 'name' | 'subType' | 'primaryColor' | 'pattern';
+  originalValue: string;
+  correctedValue: string;
+  occurrences: number;
 }
 
 export const EMPTY_ATTRIBUTES: ClothingAttributes = {

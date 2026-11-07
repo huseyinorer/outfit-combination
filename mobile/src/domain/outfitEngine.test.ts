@@ -28,6 +28,7 @@ const item = (id: string, category: Category, color = 'lacivert'): ClothingItem 
   seasons: ['dört mevsim'],
   description: '',
   photoUri: `file:///${id}.jpg`,
+  thumbnailUri: null,
   cutoutUri: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

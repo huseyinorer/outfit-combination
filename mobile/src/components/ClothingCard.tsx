@@ -15,7 +15,7 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
       onPress={onPress}
       style={({ pressed }) => [styles.card, { width }, pressed && styles.pressed]}
     >
-      <Image source={{ uri: item.photoUri }} style={styles.image} resizeMode="cover" />
+      <Image source={{ uri: item.thumbnailUri ?? item.photoUri }} style={styles.image} resizeMode="cover" />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${item.name || 'Kıyafet'} seçenekleri`}

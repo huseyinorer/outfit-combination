@@ -1,5 +1,7 @@
 using OutfitCombination.Api.Models;
 using OutfitCombination.Api.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace OutfitCombination.Api.Tests;
 
@@ -13,6 +15,12 @@ public static class TestRunner
             ("Tek mümkün kombin", SingleCombination),
             ("Üç farklı kombin", ThreeCombinations),
             ("Yanlış AI ID", InvalidAiId),
+            ("AI kısa kıyafet adı", ShortClothingName),
+            ("Kurulum belirteci doğrulama", InstallationTokenRoundTrip),
+            ("Kurulum belirteci kurcalama", InstallationTokenTampering),
+            ("Kurulum belirteci süre sonu", InstallationTokenExpiry),
+            ("Görsel imza doğrulama", ImageSignatureValidation),
+            ("Büyük kombin girdisi reddi", OversizedOutfitInput),
             ("Mobil sürüm dosyası", MobileVersionFile)
         };
         try
@@ -71,8 +79,79 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.0.1", new MobileVersionService().LatestVersion);
+        Equal("1.1.0", new MobileVersionService().LatestVersion);
     }
+
+    private static void ShortClothingName()
+    {
+        var generated = OpenAiWardrobeService.EnsureShortName(new ClothingAnalysis
+        {
+            Name = "Lacivert ince çizgili pamuklu uzun kollu gömlek"
+        }, Categories.Top);
+        Equal("Lacivert ince çizgili pamuklu gömlek", generated);
+
+        var fallback = OpenAiWardrobeService.EnsureShortName(new ClothingAnalysis
+        {
+            PrimaryColor = "Lacivert",
+            Pattern = "ince çizgili",
+            SubType = "gömlek"
+        }, Categories.Top);
+        Equal("Lacivert ince çizgili gömlek", fallback);
+    }
+
+    private static void InstallationTokenRoundTrip()
+    {
+        var service = TokenService(new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero));
+        var id = Guid.NewGuid().ToString();
+        var issued = service.Issue(id);
+        Equal(true, service.TryValidate(issued.AccessToken, out var validatedId));
+        Equal(id, validatedId);
+    }
+
+    private static void InstallationTokenTampering()
+    {
+        var service = TokenService(new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero));
+        var token = service.Issue(Guid.NewGuid().ToString()).AccessToken;
+        var tampered = token[..^1] + (token[^1] == 'A' ? 'B' : 'A');
+        Equal(false, service.TryValidate(tampered, out _));
+    }
+
+    private static void InstallationTokenExpiry()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero));
+        var service = TokenService(clock);
+        var token = service.Issue(Guid.NewGuid().ToString()).AccessToken;
+        clock.UtcNow = clock.UtcNow.AddDays(31);
+        Equal(false, service.TryValidate(token, out _));
+    }
+
+    private static void ImageSignatureValidation()
+    {
+        Equal(true, ImageUploadValidator.MatchesContentType([0xFF, 0xD8, 0xFF, 0xE0], "image/jpeg"));
+        Equal(false, ImageUploadValidator.MatchesContentType("not an image"u8, "image/jpeg"));
+        Equal(true, ImageUploadValidator.MatchesContentType([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "image/png"));
+    }
+
+    private static void OversizedOutfitInput()
+    {
+        var request = Request(Item("t1", Categories.Top));
+        request.Wardrobe[0].Description = new string('x', 501);
+        Equal(true, OutfitRules.HasOversizedInput(request));
+        request.Wardrobe[0].Description = "kısa";
+        Equal(false, OutfitRules.HasOversizedInput(request));
+    }
+
+    private static InstallationTokenService TokenService(DateTimeOffset now) =>
+        TokenService(new ManualTimeProvider(now));
+
+    private static InstallationTokenService TokenService(TimeProvider clock) => new(
+        Options.Create(new AppSecurityOptions
+        {
+            TokenSigningKey = "tests-only-signing-key-with-at-least-32-bytes",
+            TokenLifetimeDays = 30
+        }),
+        clock,
+        NullLogger<InstallationTokenService>.Instance);
 
     private static OutfitRequest Request(params WardrobeItem[] items) => new()
     {
@@ -93,6 +172,12 @@ public static class TestRunner
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new InvalidOperationException($"Beklenen {expected}, gelen {actual}");
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset initial) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = initial;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }
 

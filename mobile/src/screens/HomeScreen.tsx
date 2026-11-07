@@ -1,8 +1,7 @@
 import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { CATEGORY_LABELS, type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
 import { ClothingCard } from '../components/ClothingCard';
-import { ContentFrame } from '../components/layout';
 import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import { colors, radius, spacing } from '../theme/theme';
 
@@ -11,6 +10,7 @@ type Filter = 'all' | Category;
 interface Props {
   items: ClothingItem[];
   pendingDraft: ClothingDraft | null;
+  pendingQueueCount: number;
   demoMode: boolean;
   onAdd: (category?: Category) => void;
   onRecommend: () => void;
@@ -26,7 +26,7 @@ interface Props {
 export function HomeScreen(props: Props) {
   const { width } = useWindowDimensions();
   const [filter, setFilter] = React.useState<Filter>('all');
-  const visible = filter === 'all' ? props.items : props.items.filter((x) => x.category === filter);
+  const visible = filter === 'all' ? props.items : props.items.filter((item) => item.category === filter);
   const contentWidth = Math.min(Math.max(width - spacing.md * 2, 280), 1120);
   const columns = contentWidth >= 1000 ? 4 : contentWidth >= 680 ? 3 : 2;
   const cardWidth = (contentWidth - 12 * (columns - 1)) / columns;
@@ -46,23 +46,15 @@ export function HomeScreen(props: Props) {
       {
         text: 'Sil',
         style: 'destructive',
-        onPress: () => Alert.alert('Kıyafeti sil', 'Fotoğraf ve kayıt kalıcı olarak silinecek.', [
-          { text: 'Vazgeç', style: 'cancel' },
-          {
-            text: 'Sil',
-            style: 'destructive',
-            onPress: () => void props.onDelete(item).catch((error: unknown) => {
-              Alert.alert('Silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
-            }),
-          },
-        ]),
+        onPress: () => void props.onDelete(item).catch((error: unknown) => {
+          Alert.alert('Silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+        }),
       },
     ],
   );
 
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <ContentFrame maxWidth={1120} style={styles.content}>
+  const header = (
+    <View style={styles.headerContent}>
       <View style={styles.topBar}>
         <View>
           <Text style={styles.eyebrow}>KİŞİSEL GARDIROP</Text>
@@ -87,7 +79,9 @@ export function HomeScreen(props: Props) {
       {props.pendingDraft ? (
         <Pressable onPress={props.onResumeDraft} style={styles.draftCard}>
           <Text style={styles.draftTitle}>Yarım kalan kıyafet</Text>
-          <Text style={styles.draftText}>Fotoğrafın güvende. Düzenlemeye devam et →</Text>
+          <Text style={styles.draftText}>
+            Fotoğrafın güvende{props.pendingQueueCount > 0 ? ` · Kuyrukta ${props.pendingQueueCount} fotoğraf daha var` : ''}. Devam et →
+          </Text>
         </Pressable>
       ) : null}
 
@@ -123,38 +117,49 @@ export function HomeScreen(props: Props) {
           />
         ))}
       </View>
+    </View>
+  );
 
-      {props.items.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>◇</Text>
-          <Text style={styles.emptyTitle}>Dolabın henüz boş</Text>
-          <Text style={styles.emptyText}>İlk parçanı ekle; fotoğrafın yalnızca telefonunda kalıcı olarak saklanır.</Text>
-          <PrimaryButton title="İlk kıyafetimi ekle" onPress={() => props.onAdd()} />
-        </View>
-      ) : visible.length === 0 ? (
-        <Notice>Bu filtrede henüz parça yok.</Notice>
-      ) : (
-        <View style={styles.grid}>
-          {visible.map((item) => (
-            <ClothingCard
-              key={item.id}
-              item={item}
-              width={cardWidth}
-              onPress={() => props.onOpen(item)}
-              onMenu={() => openMenu(item)}
-            />
-          ))}
-        </View>
-      )}
-      </ContentFrame>
-    </ScrollView>
+  return (
+    <View style={styles.screen}>
+      <FlatList
+        key={columns}
+        data={visible}
+        numColumns={columns}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <ClothingCard
+            item={item}
+            width={cardWidth}
+            onPress={() => props.onOpen(item)}
+            onMenu={() => openMenu(item)}
+          />
+        )}
+        ListHeaderComponent={header}
+        ListEmptyComponent={props.items.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>◇</Text>
+            <Text style={styles.emptyTitle}>Dolabın henüz boş</Text>
+            <Text style={styles.emptyText}>İlk parçanı ekle; fotoğrafın telefonunun uygulama alanında saklanır.</Text>
+            <PrimaryButton title="İlk kıyafetimi ekle" onPress={() => props.onAdd()} />
+          </View>
+        ) : <Notice>Bu filtrede henüz parça yok.</Notice>}
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={[styles.listContent, { width: contentWidth }]}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  scrollContent: { paddingBottom: 48 },
-  content: { padding: spacing.md, gap: spacing.lg },
+  listContent: { alignSelf: 'center', paddingBottom: 48, gap: 12 },
+  headerContent: { gap: spacing.lg, marginBottom: spacing.sm },
+  gridRow: { gap: 12 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.sm },
   eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
   title: { color: colors.text, fontSize: 27, fontWeight: '900', marginTop: 3 },
@@ -171,13 +176,12 @@ const styles = StyleSheet.create({
   draftCard: { borderRadius: radius.md, backgroundColor: '#F4E5D4', padding: spacing.md, gap: 4 },
   draftTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   draftText: { color: colors.muted, fontSize: 13 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: -10 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
   sectionMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   favoriteLink: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   sectionTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   count: { color: colors.muted, fontSize: 13 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   readiness: { borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   readinessReady: { backgroundColor: colors.primarySoft },
   readinessMissing: { backgroundColor: '#F4E5D4' },
@@ -189,4 +193,3 @@ const styles = StyleSheet.create({
   emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },
   emptyText: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: 'center' },
 });
-

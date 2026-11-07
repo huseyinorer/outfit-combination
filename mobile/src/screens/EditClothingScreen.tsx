@@ -3,7 +3,6 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -61,7 +60,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
 
   const confirmDelete = () => Alert.alert(
     'Kıyafeti sil',
-    'Fotoğraf ve kayıt telefondan kalıcı olarak silinecek.',
+    'Kayıt dolaptan kaldırılacak. Ana sayfadaki bildirimin ardından 8 saniye içinde geri alabilirsin.',
     [
       { text: 'Vazgeç', style: 'cancel' },
       { text: 'Sil', style: 'destructive', onPress: () => void remove() },
@@ -69,7 +68,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
   );
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior="padding">
       <ScreenHeader
         title="Kıyafeti düzenle"
         onBack={onBack}
@@ -86,7 +85,12 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
           </Pressable>
         )}
       />
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <ContentFrame maxWidth={1080} style={[styles.content, wide && styles.contentWide]}>
           <View style={styles.mediaColumn}>
             <Image source={{ uri: item.photoUri }} style={styles.image} resizeMode="contain" />
@@ -107,6 +111,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  scroll: { flex: 1 },
   scrollContent: { paddingBottom: 32 },
   content: { padding: spacing.md, gap: spacing.lg },
   contentWide: { flexDirection: 'row', alignItems: 'flex-start' },

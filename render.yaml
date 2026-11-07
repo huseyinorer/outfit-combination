@@ -15,6 +15,10 @@ services:
         sync: false
       - key: OpenAI__Model
         value: gpt-5.4-mini
+      - key: AppSecurity__TokenSigningKey
+        sync: false
+      - key: UsageQuota__ConnectionString
+        sync: false
       - key: MobileUpdate__MinimumVersion
         value: 1.0.0
       - key: MobileUpdate__ForceLatest

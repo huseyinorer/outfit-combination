@@ -10,6 +10,14 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
 {
     private readonly OpenAiOptions _options = options.Value;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string AnalysisInstructions = """
+        Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Tüm serbest metinleri Türkçe yaz.
+        Fotoğrafta bir kıyafet varsa name alanını mutlaka doldur: 2-5 kelimelik kısa ve ayırt edici bir ad üret.
+        Kısa ad mümkünse "ana renk + belirgin desen + alt tür" sırasını izlesin; örnek: "Lacivert çizgili gömlek", "Siyah deri sneaker".
+        Name alanına cümle, marka tahmini veya açıklama yazma. Yalnızca açıkça görülen özellikleri kullan.
+        Name dışındaki tahmin edilemeyen metin alanlarını boş string ve listeleri boş dizi bırak.
+        detectedCategory yalnız top, bottom, shoes veya boş string olabilir.
+        """;
 
     public int MaxAttempts => Math.Clamp(_options.MaxAttempts, 1, 3);
 
@@ -19,16 +27,19 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         string selectedCategory,
         CancellationToken cancellationToken)
     {
-        EnsureConfigured();
         using var memory = new MemoryStream();
         await image.CopyToAsync(memory, cancellationToken);
-        var dataUrl = $"data:{contentType};base64,{Convert.ToBase64String(memory.ToArray())}";
+        var imageBytes = memory.ToArray();
+        if (!ImageUploadValidator.MatchesContentType(imageBytes, contentType))
+            throw new InvalidImageException("Dosya içeriği bildirilen görsel türüyle eşleşmiyor.");
+        EnsureConfigured();
+        var dataUrl = $"data:{contentType};base64,{Convert.ToBase64String(imageBytes)}";
 
         var body = new
         {
             model = _options.Model,
             store = false,
-            instructions = "Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Yalnızca açıkça görülen özellikleri yaz, tahmin edilemeyen metin alanlarını boş string ve listeleri boş dizi bırak. Tüm serbest metinleri Türkçe yaz. detectedCategory yalnız top, bottom, shoes veya boş string olabilir.",
+            instructions = AnalysisInstructions,
             input = new object[]
             {
                 new
@@ -56,6 +67,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         var json = await SendAsync(body, cancellationToken);
         var result = JsonSerializer.Deserialize<ClothingAnalysis>(json, JsonOptions)
             ?? throw new AiServiceException("AI boş analiz döndürdü.");
+        result.Name = EnsureShortName(result, selectedCategory);
         result.DetectedCategory = string.IsNullOrWhiteSpace(result.DetectedCategory) ? null : result.DetectedCategory;
         result.CategoryConflict = result.DetectedCategory is not null &&
             !result.DetectedCategory.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase);
@@ -183,7 +195,11 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         additionalProperties = false,
         properties = new
         {
-            name = new { type = "string" },
+            name = new
+            {
+                type = "string",
+                description = "Fotoğrafta kıyafet varsa boş olmayan, 2-5 kelimelik Türkçe kısa ad. Örnek: Lacivert çizgili gömlek."
+            },
             subType = new { type = "string" },
             primaryColor = new { type = "string" },
             secondaryColors = new { type = "array", items = new { type = "string" } },
@@ -196,6 +212,47 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         },
         required = new[] { "name", "subType", "primaryColor", "secondaryColors", "pattern", "styleTags", "seasons", "description", "detectedCategory", "categoryConflict" }
     };
+
+    internal static string EnsureShortName(ClothingAnalysis analysis, string selectedCategory)
+    {
+        var supplied = LimitWords(analysis.Name, 5);
+        if (!string.IsNullOrWhiteSpace(supplied)) return supplied;
+
+        var parts = new List<string>();
+        AddDistinct(parts, analysis.PrimaryColor);
+        if (!analysis.Pattern.Equals("düz", StringComparison.OrdinalIgnoreCase) &&
+            !analysis.Pattern.Equals("desensiz", StringComparison.OrdinalIgnoreCase))
+            AddDistinct(parts, analysis.Pattern);
+        AddDistinct(parts, analysis.SubType);
+
+        if (parts.Count == 0)
+        {
+            parts.Add(selectedCategory switch
+            {
+                Categories.Top => "Üst parça",
+                Categories.Bottom => "Alt parça",
+                Categories.Shoes => "Ayakkabı",
+                _ => "Kıyafet"
+            });
+        }
+
+        return LimitWords(string.Join(' ', parts), 5);
+    }
+
+    private static void AddDistinct(List<string> values, string value)
+    {
+        var cleaned = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (!string.IsNullOrWhiteSpace(cleaned) &&
+            !values.Any(existing => existing.Equals(cleaned, StringComparison.OrdinalIgnoreCase)))
+            values.Add(cleaned);
+    }
+
+    private static string LimitWords(string value, int limit)
+    {
+        var words = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length <= limit) return string.Join(' ', words);
+        return string.Join(' ', words.Take(limit - 1).Append(words[^1]));
+    }
 
     private static object OutfitSchema() => new
     {

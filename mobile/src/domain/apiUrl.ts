@@ -13,3 +13,8 @@ export function isValidApiBaseUrl(value: string): boolean {
     return false;
   }
 }
+
+export function isSecureApiBaseUrl(value: string): boolean {
+  if (!isValidApiBaseUrl(value)) return false;
+  return new URL(normalizeApiBaseUrl(value)).protocol === 'https:';
+}

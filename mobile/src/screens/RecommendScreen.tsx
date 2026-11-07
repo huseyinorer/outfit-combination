@@ -36,6 +36,7 @@ interface Props {
   demoMode: boolean;
   apiUrl: string;
   onBack: () => void;
+  onRequestAiConsent: () => Promise<boolean>;
   onAddCategory: (category: Category) => void;
   onResults: (
     suggestions: OutfitSuggestion[],
@@ -73,6 +74,14 @@ export function RecommendScreen(props: Props) {
         props.onResults(
           completeSuggestions(props.items, preferences),
           'Demo modu: kombinler telefondaki yerel kurallarla hazırlandı.',
+          preferences,
+        );
+        return;
+      }
+      if (!await props.onRequestAiConsent()) {
+        props.onResults(
+          completeSuggestions(props.items, preferences),
+          'AI paylaşım onayı verilmedi; kombinler tamamen telefonda hazırlandı.',
           preferences,
         );
         return;

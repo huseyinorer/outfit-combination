@@ -2,6 +2,7 @@ import type { ExpoConfig } from 'expo/config';
 import appVersion from './app-version.json';
 
 const easProjectId = '59dce122-82ee-47b4-a212-64ff019c662b';
+const appEnvironment = process.env.EXPO_PUBLIC_APP_ENV ?? 'development';
 
 const config: ExpoConfig = {
   name: 'Outfit Combination',
@@ -12,6 +13,7 @@ const config: ExpoConfig = {
   android: {
     package: 'com.krofosyonel.outfitcombination',
     permissions: ['CAMERA', 'READ_MEDIA_IMAGES'],
+    softwareKeyboardLayoutMode: 'resize',
   },
   plugins: [
     'expo-updates',
@@ -20,7 +22,7 @@ const config: ExpoConfig = {
       'expo-build-properties',
       {
         android: {
-          usesCleartextTraffic: true,
+          usesCleartextTraffic: appEnvironment === 'development',
         },
       },
     ],
@@ -43,7 +45,9 @@ const config: ExpoConfig = {
   },
   extra: {
     apiBaseUrl: process.env.EXPO_PUBLIC_API_URL ?? '',
-    appEnvironment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
+    privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL
+      ?? 'https://huseyinorer.github.io/outfit-combination/',
+    appEnvironment,
     eas: {
       projectId: easProjectId,
     },

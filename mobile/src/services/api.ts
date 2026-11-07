@@ -1,6 +1,7 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
-import { normalizeApiBaseUrl } from '../domain/apiUrl';
+import Constants from 'expo-constants';
+import { isSecureApiBaseUrl, normalizeApiBaseUrl } from '../domain/apiUrl';
 import type {
   Category,
   ClothingAttributes,
@@ -9,6 +10,7 @@ import type {
   OutfitResult,
   OutfitSuggestion,
 } from '../domain/types';
+import { authenticatedFetch } from './installationAuth';
 
 interface AnalyzeResponse extends ClothingAttributes {
   categoryConflict: boolean;
@@ -16,6 +18,14 @@ interface AnalyzeResponse extends ClothingAttributes {
 }
 
 const cleanBaseUrl = normalizeApiBaseUrl;
+const allowHttpApi = String(Constants.expoConfig?.extra?.appEnvironment ?? 'development') === 'development';
+
+function checkedBaseUrl(value: string): string {
+  const cleanUrl = cleanBaseUrl(value);
+  if (!cleanUrl) throw new Error('API adresi ayarlanmamış.');
+  if (!allowHttpApi && !isSecureApiBaseUrl(cleanUrl)) throw new Error('Bu uygulama sürümü backend için HTTPS adresi gerektiriyor.');
+  return cleanUrl;
+}
 
 async function readError(response: Response): Promise<string> {
   try {
@@ -27,18 +37,23 @@ async function readError(response: Response): Promise<string> {
 }
 
 export async function checkApiHealth(baseUrl: string): Promise<boolean> {
+  return (await getApiHealth(baseUrl)).online;
+}
+
+export async function getApiHealth(baseUrl: string): Promise<{ online: boolean; quotaPersistent: boolean }> {
   const cleanUrl = cleanBaseUrl(baseUrl);
-  if (!cleanUrl) return false;
+  if (!cleanUrl) return { online: false, quotaPersistent: false };
+  if (!allowHttpApi && !isSecureApiBaseUrl(cleanUrl)) return { online: false, quotaPersistent: false };
   const controller = new AbortController();
   // Render Free may need about a minute to wake after an idle period.
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     const response = await expoFetch(`${cleanUrl}/health`, { signal: controller.signal });
-    if (!response.ok) return false;
-    const body = (await response.json()) as { status?: string };
-    return body.status === 'ok';
+    if (!response.ok) return { online: false, quotaPersistent: false };
+    const body = (await response.json()) as { status?: string; quotaPersistence?: string };
+    return { online: body.status === 'ok', quotaPersistent: body.quotaPersistence === 'postgres' };
   } catch {
-    return false;
+    return { online: false, quotaPersistent: false };
   } finally {
     clearTimeout(timeout);
   }
@@ -50,7 +65,7 @@ export async function analyzeClothing(
   photoUri: string,
   externalSignal?: AbortSignal,
 ): Promise<AnalyzeResponse> {
-  if (!cleanBaseUrl(baseUrl)) throw new Error('API adresi ayarlanmamış.');
+  checkedBaseUrl(baseUrl);
   const form = new FormData();
   form.append('category', category);
   const photo = new File(photoUri);
@@ -63,11 +78,10 @@ export async function analyzeClothing(
   // Render Free can take about a minute to wake after an idle period.
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await expoFetch(`${cleanBaseUrl(baseUrl)}/api/analyze`, {
+    const response = await authenticatedFetch(baseUrl, '/api/analyze', {
       method: 'POST',
       body: form,
-      signal: controller.signal,
-    });
+    }, controller.signal);
     if (!response.ok) throw new Error(await readError(response));
     return (await response.json()) as AnalyzeResponse;
   } catch (error) {
@@ -99,18 +113,17 @@ export async function requestOutfits(
   preferences: OutfitPreferences,
   wardrobe: ClothingItem[],
 ): Promise<OutfitResult> {
-  if (!cleanBaseUrl(baseUrl)) throw new Error('API adresi ayarlanmamış.');
+  checkedBaseUrl(baseUrl);
   const controller = new AbortController();
   // Allow the first request to include a possible Render Free cold start.
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     // Bu gövde bilinçli olarak fotoğraf, URI, dosya yolu ve base64 içermez.
-    const response = await expoFetch(`${cleanBaseUrl(baseUrl)}/api/outfits`, {
+    const response = await authenticatedFetch(baseUrl, '/api/outfits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preferences, wardrobe: wardrobe.map(toApiItem) }),
-      signal: controller.signal,
-    });
+    }, controller.signal);
     if (!response.ok) throw new Error(await readError(response));
     const body = (await response.json()) as {
       suggestions: OutfitSuggestion[];

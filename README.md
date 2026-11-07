@@ -26,8 +26,17 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub, EAS, and Render setup.
 - Up to three different valid outfits when the wardrobe permits
 - Swipeable result cards using the actual photos associated with each returned ID
 - Persistent favorite outfits, full-screen photo viewing, and alternate local suggestions
+- Persistent bulk-add queue for up to 20 gallery images in the same category
+- Generated 420 px thumbnails and a virtualized wardrobe grid for larger closets
+- Eight-second undo for clothing deletion with crash-safe cleanup
+- First-run onboarding and local learning from repeated AI field corrections
 - Responsive phone, tablet, BlueStacks, portrait, and landscape layouts
 - Explicit Demo mode that works without an API key or running backend
+- Explicit consent before any clothing photo or wardrobe metadata is sent to AI
+- Two-step deletion of all local clothing, photos, favorites, drafts, and settings
+- Server-signed installation access tokens and per-installation AI rate limits
+- Persistent daily and monthly AI cost quotas backed by Neon PostgreSQL
+- In-app privacy/KVKK text, a public GitHub Pages policy, and a Play Data Safety draft
 - Startup version check for new APK releases
 - Expo OTA updates for compatible JavaScript and asset changes
 
@@ -63,8 +72,6 @@ npm test
 npx expo start --clear
 ```
 
-The current managed environment could not download the newly added `expo-updates` package because npm was restricted to its local cache. Running `npm install` in a normal internet-connected PowerShell session updates both the package and `package-lock.json`.
-
 ## Run the backend locally
 
 The backend uses one AI provider: the OpenAI Responses API. Images are sent only during the initial analysis request. Outfit requests contain IDs, categories, and text attributes only.
@@ -75,12 +82,14 @@ Set secrets only in the backend environment:
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\api
 $env:OPENAI_API_KEY="your-key"
 $env:OpenAI__Model="gpt-5.4-mini"
+$env:AppSecurity__TokenSigningKey="a-random-secret-with-at-least-32-bytes"
+$env:UsageQuota__ConnectionString="Host=...;Database=neondb;Username=...;Password=...;SSL Mode=Require"
 dotnet restore
 dotnet build
 dotnet run --urls http://0.0.0.0:5080
 ```
 
-Do not place the API key in source files, `appsettings.json`, Expo variables, the mobile app, or Git.
+Do not place the OpenAI key, signing key, or Neon connection string in source files, `appsettings.json`, Expo variables, the mobile app, or Git. Local Development can use an in-memory quota fallback. Production fails closed and does not send an AI request when the persistent quota database is missing or unavailable.
 
 Health and version endpoints:
 
@@ -145,6 +154,8 @@ To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or 
 
 The Render Blueprint uses the Free compute plan. The service can spin down after an idle period, so clothing analysis and outfit requests allow up to 90 seconds for a cold start. A failed analysis keeps its local draft and can be retried safely.
 
+The privacy policy is published from `privacy-site/` by `.github/workflows/privacy-pages.yml`. Enable **Settings > Pages > Build and deployment > GitHub Actions** once. The expected public URL is `https://huseyinorer.github.io/outfit-combination/`. Review the developer name and support contact before a Play Store submission. `docs/PLAY_DATA_SAFETY_TR.md` contains the current Play Console declaration draft.
+
 Compatible TypeScript, styling, text, and asset changes can use OTA updates. Native dependencies, Expo plugins, Android permissions, manifests, and SDK changes require a new APK version.
 
 ## Versioning
@@ -156,7 +167,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.0.1`. Increment both files together for the next native release.
+The current native app version is `1.1.0`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -182,6 +193,8 @@ Verified test scenarios include:
 - Only one possible outfit
 - At least three distinct outfits
 - Invalid or wrong-category AI IDs
+- Valid, tampered, and expired installation access tokens
+- Mismatched image signatures and oversized outfit metadata
 - Duplicate AI combinations
 - Manual records after an API outage
 - Exact photo-to-ID matching
@@ -190,9 +203,10 @@ Verified test scenarios include:
 Current local verification:
 
 - Mobile TypeScript check passed
-- Mobile tests: 13/13 passed
-- Backend Release build: 0 errors and 0 warnings
-- Backend tests: 5/5 passed
+- Mobile tests: 16/16 passed
+- Backend build before the Neon quota dependency: 0 errors and 0 warnings
+- Existing backend tests before the Neon quota dependency: 11/11 passed
+- The managed local environment could not download Npgsql from NuGet; the GitHub backend check must complete the post-quota restore/build verification
 
 SQLite persistence, camera orientation, and final photo placement still require validation inside BlueStacks or on a physical Android device.
 

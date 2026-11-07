@@ -19,6 +19,26 @@ public static class OutfitRules
         ["Özel gün"] = ["klasik", "şık", "resmi"]
     };
 
+    public static bool HasOversizedInput(OutfitRequest request)
+    {
+        if (request.Preferences is null || request.Wardrobe is null) return true;
+        if (TooLong(request.Preferences.Destination, 100)
+            || TooLong(request.Preferences.Look, 100)
+            || TooLong(request.Preferences.Tone, 100)) return true;
+
+        return request.Wardrobe.Any(item => item is null
+            || TooLong(item.Id, 100)
+            || TooLong(item.Category, 20)
+            || TooLong(item.Name, 120)
+            || TooLong(item.SubType, 120)
+            || TooLong(item.PrimaryColor, 80)
+            || TooLong(item.Pattern, 120)
+            || TooLong(item.Description, 500)
+            || OversizedList(item.SecondaryColors)
+            || OversizedList(item.StyleTags)
+            || OversizedList(item.Seasons));
+    }
+
     public static IReadOnlyList<string> MissingCategories(IEnumerable<WardrobeItem> wardrobe)
     {
         var categories = wardrobe.Select(x => x.Category).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -126,6 +146,9 @@ public static class OutfitRules
             ? Display(item, fallback)
             : $"{Display(item, fallback)} ({item.PrimaryColor})";
     private static string Key(string top, string bottom, string shoes) => $"{top}|{bottom}|{shoes}";
+    private static bool TooLong(string? value, int maximum) => value is null || value.Length > maximum;
+    private static bool OversizedList(IReadOnlyCollection<string>? values) =>
+        values is null || values.Count > 20 || values.Any(value => TooLong(value, 80));
     private sealed record Triple(WardrobeItem Top, WardrobeItem Bottom, WardrobeItem Shoes, double Score);
 }
 

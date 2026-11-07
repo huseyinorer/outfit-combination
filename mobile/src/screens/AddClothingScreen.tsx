@@ -4,7 +4,6 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +15,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
-import { getSetting, setSetting } from '../data/database';
+import { getSetting, listCorrectionRules, recordAiCorrections, setSetting } from '../data/database';
+import { applyLearnedCorrections } from '../domain/correctionLearning';
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -26,7 +26,7 @@ import {
   type ClothingItem,
 } from '../domain/types';
 import { analyzeClothing } from '../services/api';
-import { deleteStoredImage, finalizeImage, prepareSelectedImage } from '../services/imageStorage';
+import { createThumbnail, deleteStoredImage, finalizeImage, prepareSelectedImage } from '../services/imageStorage';
 import { colors, radius, spacing } from '../theme/theme';
 
 const guidance: Record<Category, string> = {
@@ -40,24 +40,31 @@ interface Props {
   demoMode: boolean;
   initialCategory?: Category;
   initialDraft: ClothingDraft | null;
+  initialQueue: ClothingDraft[];
   onPersistDraft: (draft: ClothingDraft | null) => Promise<void>;
+  onPersistQueue: (queue: ClothingDraft[]) => Promise<void>;
   onSave: (item: ClothingItem) => Promise<void>;
+  onComplete: () => void;
+  onRequestAiConsent: () => Promise<boolean>;
   onBack: () => void;
 }
 
 export function AddClothingScreen(props: Props) {
   const { width } = useWindowDimensions();
   const [draft, setDraft] = useState<ClothingDraft | null>(props.initialDraft);
+  const [queue, setQueue] = useState<ClothingDraft[]>(props.initialQueue);
   const [category, setCategory] = useState<Category | null>(props.initialDraft?.category ?? props.initialCategory ?? null);
   const [busy, setBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualMode, setManualMode] = useState(props.demoMode || Boolean(props.initialDraft?.analysisError));
   const [analysisElapsed, setAnalysisElapsed] = useState(0);
+  const [learnedApplied, setLearnedApplied] = useState(false);
   const [lastSource, setLastSource] = useState<'camera' | 'gallery'>('camera');
   const savingRef = useRef(false);
   const analysisRequestRef = useRef<AbortController | null>(null);
   const hasPhoto = Boolean(draft?.photoUri);
   const wide = width >= 900;
+  const batchRemaining = (draft ? 1 : 0) + queue.length;
 
   useEffect(() => {
     getSetting('last_photo_source').then((value) => {
@@ -90,6 +97,12 @@ export function AddClothingScreen(props: Props) {
       await persist(next);
       return;
     }
+    if (!await props.onRequestAiConsent()) {
+      const next = { ...current, analysisError: 'Fotoğraf AI hizmetine gönderilmedi. Alanları elle tamamlayabilir veya yeniden deneyip onay verebilirsin.' };
+      setManualMode(true);
+      await persist(next);
+      return;
+    }
     analysisRequestRef.current?.abort();
     const controller = new AbortController();
     analysisRequestRef.current = controller;
@@ -98,18 +111,27 @@ export function AddClothingScreen(props: Props) {
     setManualMode(false);
     try {
       const result = await analyzeClothing(props.apiUrl, current.category, current.photoUri, controller.signal);
+      const aiAttributes = {
+        name: result.name ?? '',
+        subType: result.subType ?? '',
+        primaryColor: result.primaryColor ?? '',
+        secondaryColors: result.secondaryColors ?? [],
+        pattern: result.pattern ?? '',
+        styleTags: result.styleTags ?? [],
+        seasons: result.seasons ?? [],
+        description: result.description ?? '',
+      };
+      const attributes = applyLearnedCorrections(aiAttributes, await listCorrectionRules(current.category));
+      setLearnedApplied(
+        attributes.name !== aiAttributes.name
+        || attributes.subType !== aiAttributes.subType
+        || attributes.primaryColor !== aiAttributes.primaryColor
+        || attributes.pattern !== aiAttributes.pattern,
+      );
       await persist({
         ...current,
-        attributes: {
-          name: result.name ?? '',
-          subType: result.subType ?? '',
-          primaryColor: result.primaryColor ?? '',
-          secondaryColors: result.secondaryColors ?? [],
-          pattern: result.pattern ?? '',
-          styleTags: result.styleTags ?? [],
-          seasons: result.seasons ?? [],
-          description: result.description ?? '',
-        },
+        attributes,
+        aiAttributes,
         categoryConflict: result.categoryConflict,
         detectedCategory: result.detectedCategory,
         analysisError: null,
@@ -148,6 +170,7 @@ export function AddClothingScreen(props: Props) {
         detectedCategory: null,
         analysisError: null,
       };
+      setLearnedApplied(false);
       await persist(next);
       await runAnalysis(next);
     } catch (error) {
@@ -168,6 +191,54 @@ export function AddClothingScreen(props: Props) {
       setLastSource('gallery');
       await setSetting('last_photo_source', 'gallery');
       await acceptAsset(result.assets[0].uri);
+    }
+  };
+
+  const pickMultipleFromLibrary = async () => {
+    if (!category || hasPhoto) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Galeri izni gerekli', 'Birden fazla fotoğraf seçebilmek için galeri izni vermelisin.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      allowsMultipleSelection: true,
+      selectionLimit: 20,
+    });
+    if (result.canceled || result.assets.length === 0) return;
+
+    setBusy(true);
+    const prepared: ClothingDraft[] = [];
+    try {
+      for (const asset of result.assets) {
+        const id = Crypto.randomUUID();
+        prepared.push({
+          id,
+          category,
+          photoUri: await prepareSelectedImage(asset.uri, id),
+          attributes: { ...EMPTY_ATTRIBUTES },
+          aiAttributes: null,
+          categoryConflict: false,
+          detectedCategory: null,
+          analysisError: null,
+        });
+      }
+      const [first, ...remaining] = prepared;
+      if (!first) return;
+      setLearnedApplied(false);
+      setLastSource('gallery');
+      await setSetting('last_photo_source', 'gallery');
+      setQueue(remaining);
+      await props.onPersistQueue(remaining);
+      await persist(first);
+      await runAnalysis(first);
+    } catch (error) {
+      prepared.forEach((item) => deleteStoredImage(item.photoUri));
+      Alert.alert('Toplu ekleme hazırlanamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -213,18 +284,39 @@ export function AddClothingScreen(props: Props) {
     setBusy(true);
     try {
       const photoUri = await finalizeImage(draft.photoUri, draft.id);
+      let thumbnailUri: string | null = null;
+      try { thumbnailUri = await createThumbnail(photoUri, draft.id); }
+      catch { thumbnailUri = null; }
       const now = new Date().toISOString();
       await props.onSave({
         id: draft.id,
         category: draft.category,
         ...draft.attributes,
         photoUri,
+        thumbnailUri,
         cutoutUri: null,
         createdAt: now,
         updatedAt: now,
       });
+      try { await recordAiCorrections(draft.category, draft.aiAttributes, draft.attributes); }
+      catch {
+        // Öğrenme kaydı ana kıyafet kaydını başarısız göstermesin.
+      }
       deleteStoredImage(draft.photoUri);
-      await props.onPersistDraft(null);
+      const [next, ...remaining] = queue;
+      setQueue(remaining);
+      await props.onPersistQueue(remaining);
+      if (next) {
+        setCategory(next.category);
+        setLearnedApplied(false);
+        setManualMode(props.demoMode || Boolean(next.analysisError));
+        await persist(next);
+        await runAnalysis(next);
+      } else {
+        setDraft(null);
+        await props.onPersistDraft(null);
+        props.onComplete();
+      }
     } catch (error) {
       Alert.alert('Kaydedilemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
     } finally {
@@ -234,9 +326,14 @@ export function AddClothingScreen(props: Props) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior="padding">
       <ScreenHeader title={stepTitle} onBack={props.onBack} />
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <ContentFrame maxWidth={1080} style={styles.content}>
         {!category ? (
           <>
@@ -268,10 +365,16 @@ export function AddClothingScreen(props: Props) {
               onPress={() => openSource(lastSource === 'camera' ? 'gallery' : 'camera')}
               disabled={busy}
             />
+            <SecondaryButton
+              title="Galeriden toplu ekle · En fazla 20"
+              onPress={() => void pickMultipleFromLibrary()}
+              disabled={busy}
+            />
             {busy ? <View style={styles.busyRow}><ActivityIndicator color={colors.primary} /><Text style={styles.analysisText}>Fotoğraf hazırlanıyor…</Text></View> : null}
           </>
         ) : draft ? (
           <>
+            {batchRemaining > 1 ? <Notice>Toplu ekleme kuyruğu: bu parçayla birlikte {batchRemaining} fotoğraf kaldı.</Notice> : null}
             <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
               <View style={styles.mediaColumn}>
                 <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
@@ -289,6 +392,7 @@ export function AddClothingScreen(props: Props) {
                     Model bu parçayı {draft.detectedCategory ? CATEGORY_LABELS[draft.detectedCategory] : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.
                   </Notice>
                 ) : null}
+                {learnedApplied ? <Notice>Önceki düzeltmelerine göre bazı AI alanları telefonda otomatik düzeltildi.</Notice> : null}
                 {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
                 {draft.analysisError && !props.demoMode ? (
                   <SecondaryButton title="Yeniden dene" onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
@@ -323,6 +427,7 @@ export function AddClothingScreen(props: Props) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  scroll: { flex: 1 },
   scrollContent: { paddingBottom: 32 },
   content: { padding: spacing.md, gap: spacing.md },
   heading: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: spacing.md },

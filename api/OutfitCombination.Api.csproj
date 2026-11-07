@@ -7,6 +7,9 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);OutfitCombination.Api.Tests/**/*</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="..\mobile\app-version.json" Link="mobile-app-version.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

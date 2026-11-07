@@ -4,11 +4,13 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 const root = new Directory(Paths.document, 'outfit-combination');
 const pending = new Directory(root, 'pending');
 const wardrobe = new Directory(root, 'wardrobe');
+const thumbnails = new Directory(root, 'thumbnails');
 
 function ensureDirectories(): void {
   root.create({ idempotent: true, intermediates: true });
   pending.create({ idempotent: true, intermediates: true });
   wardrobe.create({ idempotent: true, intermediates: true });
+  thumbnails.create({ idempotent: true, intermediates: true });
 }
 
 export async function prepareSelectedImage(sourceUri: string, draftId: string): Promise<string> {
@@ -33,6 +35,19 @@ export async function finalizeImage(pendingUri: string, clothingId: string): Pro
   return destination.uri;
 }
 
+export async function createThumbnail(photoUri: string, clothingId: string): Promise<string> {
+  ensureDirectories();
+  const context = ImageManipulator.manipulate(photoUri);
+  context.resize({ width: 420, height: null });
+  const rendered = await context.renderAsync();
+  const normalized = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.72 });
+  const source = new File(normalized.uri);
+  const destination = new File(thumbnails, `${clothingId}.jpg`);
+  if (destination.exists) destination.delete();
+  await source.copy(destination);
+  return destination.uri;
+}
+
 export function deleteStoredImage(uri: string | null | undefined): void {
   if (!uri) return;
   try {
@@ -41,5 +56,9 @@ export function deleteStoredImage(uri: string | null | undefined): void {
   } catch {
     // Veritabanı kaydının silinmesini bozuk/eski bir dosya yolu engellemesin.
   }
+}
+
+export function deleteAllStoredImages(): void {
+  if (root.exists) root.delete();
 }
 

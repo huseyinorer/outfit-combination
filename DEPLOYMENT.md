@@ -1,6 +1,6 @@
 # GitHub, EAS ve Render yayın akışı
 
-Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API yalnızca OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Bu nedenle ilk sürümde Neon veya başka bir sunucu veritabanı gerekmez.
+Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API yalnızca OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Neon yalnız kalıcı günlük/aylık AI kullanım sayaçları için kullanılır; kişisel dolabın sunucu veritabanına kopyalanmaz.
 
 ## Otomatik akış
 
@@ -65,10 +65,16 @@ Workflow her `main` merge'inde OTA yayınlar. `mobile/app-version.json` ve `mobi
 
 ```text
 OPENAI_API_KEY=sk-...
+AppSecurity__TokenSigningKey=en-az-32-bayt-rastgele-gizli-deger
+UsageQuota__ConnectionString=Host=NEON_HOST;Database=neondb;Username=NEON_USER;Password=NEON_PASSWORD;SSL Mode=Require
 MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combination/releases/latest/download/outfit-combination.apk
 ```
 
 `OpenAI__Model` varsayılan olarak `gpt-5.4-mini` ayarlanmıştır ve Render ortam değişkeninden değiştirilebilir. Anahtar yalnız Render backend'inde bulunur; APK'ya, Expo ortamına veya Git'e girmez.
+
+`AppSecurity__TokenSigningKey` için parola kullanma; rastgele en az 32 bayt üret ve yalnız Render Secret olarak sakla. Üretim backend'i bu değer eksik veya kısa olduğunda bilinçli olarak açılmaz. Analiz ve kombin uçları yalnız sunucunun imzaladığı kurulum belirteçlerini kabul eder; mobil uygulama süresi dolan belirteci otomatik yeniler.
+
+`UsageQuota__ConnectionString` için Neon Dashboard'daki **Connect** ekranından PostgreSQL bağlantı bilgilerini al ve Render Secret olarak ekle. Backend ilk AI isteğinde `ai_usage_quota` tablosunu ve indeksini otomatik oluşturur. Günlük ve aylık analiz/kombin sayaçları atomik artırılır; 13 aydan eski dönemler temizlenir. Production ortamında Neon bağlantısı yoksa veya doğrulanamıyorsa maliyeti korumak için OpenAI isteği gönderilmez.
 
 `render.yaml`, Frankfurt bölgesinde ücretsiz `free` web service planını seçer. Ödeme bilgisi gerekmez; ancak servis 15 dakika boşta kalınca kapanır ve ilk istek yaklaşık bir dakika bekleyebilir. Mobil analiz ve kombin istekleri bu soğuk başlangıca izin vermek için 90 saniye zaman aşımı kullanır. İlk istek yine de kesilirse fotoğraf taslağı kaybolmaz; yeniden denendiğinde uyanmış servis yanıt verir.
 
@@ -90,6 +96,16 @@ https://SERVIS-ADIN.onrender.com/api/version
 
 Uygulama daha sonra yeni native sürüm görürse **APK'yı indir** düğmesini gösterir. İndirilen APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler.
 
-## 5. Neon ne zaman gerekir?
+## 5. Gizlilik politikasını yayınlama
 
-Şu anda gerekmez. Dolap kayıtları SQLite'ta, fotoğraflar telefonun kalıcı uygulama alanındadır; Render dosya sistemine kullanıcı verisi yazılmaz. Üyelik, birden çok cihaz arasında senkronizasyon veya bulut yedekleme eklenirse Neon Postgres o aşamada anlamlı olur. O durumda fotoğraflar yine Neon'a değil bir obje depolama servisine konmalıdır.
+Depo ayarlarında **Settings > Pages > Build and deployment > Source** alanını **GitHub Actions** yap. `main` dalına `privacy-site/` değişikliği geldiğinde `Publish privacy policy` workflow'u politikayı otomatik yayımlar:
+
+```text
+https://huseyinorer.github.io/outfit-combination/
+```
+
+Bu adresi Play Console gizlilik politikası alanına yaz. Uygulamanın Ayarlar ekranı da aynı adrese gider. Mağaza başvurusundan önce geliştirici unvanını ve iletişim yöntemini `privacy-site/index.html`, uygulama içi politika ve Play Console ile birebir eşleştir. Data Safety cevap taslağı `docs/PLAY_DATA_SAFETY_TR.md` dosyasındadır.
+
+## 6. Neon ne zaman gerekir?
+
+Neon artık yalnız kalıcı AI kullanım kotası için kullanılır. Dolap kayıtları ve fotoğraflar hâlâ telefondadır; Render veya Neon'a kişisel dolap kopyası yazılmaz. Üyelik, çoklu cihaz senkronizasyonu veya bulut yedekleme daha sonra eklenirse hesap ve metadata Neon'da tutulabilir; fotoğraflar yine obje depolama servisine konmalıdır.

@@ -68,3 +68,5 @@ public sealed record OutfitResponse(
     bool UsedFallback,
     string? Warning = null);
 
+public sealed record InstallationRegistration(string InstallationId, string? AppVersion);
+
