@@ -42,6 +42,8 @@ EXPO_PUBLIC_API_URL=https://outfit-combination-api.onrender.com
 5. GitHub'da **Settings > Secrets and variables > Actions > Variables > New repository variable** altında `DEPLOY_ENABLED=true` ekle.
 6. GitHub'da **Actions > Test, publish and release > Run workflow** ile süreci yeniden çalıştır.
 
+Mevcut sürümün GitHub Release APK bağlantısı 5xx hatası verirse aynı ekranda `rebuild_apk` seçeneğini işaretleyip workflow'u çalıştır. İş akışı mevcut sürümü yeniden derler, `outfit-combination.apk` asset'ini güvenli şekilde değiştirir, boyutunu ve indirilebilirliğini doğrular.
+
 Render hizmetinin gerçek adresi farklı oluşursa Expo değerini onunla değiştir. `DEPLOY_ENABLED` kapısı, ilk kurulum tamamlanmadan yanlış API adresli APK yayınlanmasını engeller; değişken `true` olduktan sonra her `main` merge'i otomatik yayınlanır.
 
 EAS hesabında bu Android uygulaması için henüz imzalama anahtarı yoksa ilk seferi kendi PowerShell'inde etkileşimli çalıştır:

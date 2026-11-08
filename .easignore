@@ -6,8 +6,8 @@ mobile/node_modules/
 mobile/.expo/
 mobile/dist/
 mobile/web-build/
-mobile/android/
-mobile/ios/
+/mobile/android/
+/mobile/ios/
 
 .env
 .env.*

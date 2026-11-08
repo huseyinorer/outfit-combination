@@ -157,7 +157,7 @@ To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or 
 - Pull requests run mobile and backend checks without publishing.
 - Merges to `main` trigger Render after CI checks pass.
 - When `DEPLOY_ENABLED=true`, merges to `main` also publish an Expo OTA update.
-- If `mobile/app-version.json` has a version with no matching GitHub Release, EAS builds an APK and publishes it as `outfit-combination.apk`.
+- If `mobile/app-version.json` has a version with no healthy GitHub Release asset, EAS builds an APK and publishes it as `outfit-combination.apk`. A manual workflow run can set `rebuild_apk=true` to replace a missing or broken asset for the current version.
 - The app checks `/api/version` on startup and whenever it returns to the foreground. A normal update can be dismissed; only versions below `minimumVersion` are blocked.
 - Internal APK builds from v1.3.0 onward download updates inside the app, show progress, and hand the completed APK to Android's installer. Android still requires explicit user approval. Store builds exclude the restricted package-install permission and must use the store update flow.
 
@@ -176,7 +176,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.3.0`. Increment both files together for the next native release.
+The current native app version is `1.3.1`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -214,7 +214,7 @@ Current local verification:
 
 - Mobile TypeScript check passed
 - Mobile tests: 16/16 passed
-- Mobile/app version consistency passed for 1.3.0
+- Mobile/app version consistency passed for 1.3.1
 - Android Metro export passed with the local update-installer module included; Expo Autolinking resolved the Android module successfully
 - This Windows environment has no Java/Android SDK, so the local Kotlin/Gradle build remains for EAS to verify
 - The managed local environment could not download Npgsql from NuGet, so the GitHub backend check must verify the normal restore/build and 17 backend scenarios

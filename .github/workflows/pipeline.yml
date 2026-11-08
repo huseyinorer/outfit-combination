@@ -2,6 +2,12 @@ name: Test, publish and release
 
 on:
   workflow_dispatch:
+    inputs:
+      rebuild_apk:
+        description: Rebuild and replace the APK asset for the current version
+        required: false
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
   push:
@@ -29,6 +35,7 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - run: npm install --no-audit --no-fund
+      - run: npx -y expo-doctor
       - run: npm run check:version
       - run: npm run typecheck
       - run: npm test
@@ -83,38 +90,75 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      - name: Check whether this version already has a release
+      - name: Check whether this version has a healthy APK release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_apk || false }}
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./mobile/app-version.json').version")
+          TAG="v$VERSION"
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/outfit-combination.apk"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          RELEASE_EXISTS=false
+          APK_HEALTHY=false
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            RELEASE_EXISTS=true
+            APK_SIZE=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name == "outfit-combination.apk") | .size' | head -n 1)
+            if [[ "$APK_SIZE" =~ ^[0-9]+$ ]] && [ "$APK_SIZE" -gt 10000000 ]; then
+              if curl --fail --silent --show-error --location --head \
+                --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 \
+                "$DOWNLOAD_URL" >/dev/null; then
+                APK_HEALTHY=true
+              fi
+            fi
           fi
+
+          NEEDS_BUILD=true
+          if [ "$APK_HEALTHY" = true ] && [ "$FORCE_REBUILD" != true ]; then
+            NEEDS_BUILD=false
+          fi
+          echo "release_exists=$RELEASE_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "needs_build=$NEEDS_BUILD" >> "$GITHUB_OUTPUT"
       - name: Install mobile dependencies
-        if: steps.release.outputs.exists == 'false'
+        if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile
         run: npm install --no-audit --no-fund
       - uses: expo/expo-github-action@v9
-        if: steps.release.outputs.exists == 'false'
+        if: steps.release.outputs.needs_build == 'true'
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
       - name: Build directly installable APK
-        if: steps.release.outputs.exists == 'false'
+        if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile
         run: eas build --platform android --profile preview --non-interactive --wait --json > eas-build.json
       - name: Download and publish APK release
-        if: steps.release.outputs.exists == 'false'
+        if: steps.release.outputs.needs_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_EXISTS: ${{ steps.release.outputs.release_exists }}
         run: |
+          set -euo pipefail
           APK_URL=$(jq -r '.[0].artifacts.buildUrl' mobile/eas-build.json)
           test -n "$APK_URL" && test "$APK_URL" != "null"
-          curl --fail --location "$APK_URL" --output outfit-combination.apk
-          gh release create "v$VERSION" outfit-combination.apk --title "Outfit Combination v$VERSION" --generate-notes
+          curl --fail --location --retry 3 --retry-all-errors "$APK_URL" --output outfit-combination.apk
+          APK_SIZE=$(stat --format=%s outfit-combination.apk)
+          test "$APK_SIZE" -gt 10000000
+          sha256sum outfit-combination.apk > outfit-combination.apk.sha256
+
+          if [ "$RELEASE_EXISTS" = true ]; then
+            gh release upload "v$VERSION" outfit-combination.apk outfit-combination.apk.sha256 --clobber
+          else
+            gh release create "v$VERSION" outfit-combination.apk outfit-combination.apk.sha256 \
+              --title "Outfit Combination v$VERSION" --generate-notes
+          fi
+
+          REMOTE_SIZE=$(gh release view "v$VERSION" --json assets --jq '.assets[] | select(.name == "outfit-combination.apk") | .size' | head -n 1)
+          test "$REMOTE_SIZE" = "$APK_SIZE"
+          curl --fail --silent --show-error --location --head \
+            --retry 5 --retry-all-errors --connect-timeout 15 --max-time 90 \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION/outfit-combination.apk" >/dev/null

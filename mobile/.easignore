@@ -4,8 +4,8 @@ node_modules/
 .expo/
 dist/
 web-build/
-android/
-ios/
+/android/
+/ios/
 
 # Local secrets must not be uploaded.
 .env

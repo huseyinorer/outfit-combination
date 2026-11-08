@@ -3,8 +3,6 @@ mobile/node_modules/
 mobile/.expo/
 mobile/dist/
 mobile/web-build/
-mobile/android/
-mobile/ios/
 mobile/.git-empty-backup/
 
 # .NET
