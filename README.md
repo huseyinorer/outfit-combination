@@ -159,10 +159,11 @@ To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or 
 - When `DEPLOY_ENABLED=true`, merges to `main` also publish an Expo OTA update.
 - If `mobile/app-version.json` has a version with no matching GitHub Release, EAS builds an APK and publishes it as `outfit-combination.apk`.
 - The app checks `/api/version` on startup and whenever it returns to the foreground. A normal update can be dismissed; only versions below `minimumVersion` are blocked.
+- Internal APK builds from v1.3.0 onward download updates inside the app, show progress, and hand the completed APK to Android's installer. Android still requires explicit user approval. Store builds exclude the restricted package-install permission and must use the store update flow.
 
 The Render Blueprint uses the Free compute plan. The service can spin down after an idle period, so clothing analysis and outfit requests allow up to 90 seconds for a cold start. A failed analysis keeps its local draft and can be retried safely.
 
-The privacy policy is published from `privacy-site/` by `.github/workflows/privacy-pages.yml`. Enable **Settings > Pages > Build and deployment > GitHub Actions** once. The expected public URL is `https://huseyinorer.github.io/outfit-combination/`. Review the developer name and support contact before a Play Store submission. `docs/PLAY_DATA_SAFETY_TR.md` contains the current Play Console declaration draft.
+The public app page and legal documents are published from `privacy-site/` by `.github/workflows/privacy-pages.yml`. Enable **Settings > Pages > Build and deployment > GitHub Actions** once. The homepage is `https://huseyinorer.github.io/outfit-combination/`, the privacy policy is `/privacy.html`, and the terms are `/terms.html`. Review the developer name and support contact before a Play Store submission. `docs/PLAY_DATA_SAFETY_TR.md` contains the current Play Console declaration draft.
 
 Compatible TypeScript, styling, text, and asset changes can use OTA updates. Native dependencies, Expo plugins, Android permissions, manifests, and SDK changes require a new APK version.
 
@@ -175,7 +176,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.2.0`. Increment both files together for the next native release.
+The current native app version is `1.3.0`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -213,9 +214,10 @@ Current local verification:
 
 - Mobile TypeScript check passed
 - Mobile tests: 16/16 passed
-- Mobile/app version consistency passed for 1.2.0
-- Offline backend syntax build: 0 errors and 0 warnings; backend scenarios: 17/17 passed
-- The managed local environment could not download the real Npgsql package from NuGet, so the GitHub backend check must still verify the normal restore/build against Npgsql
+- Mobile/app version consistency passed for 1.3.0
+- Android Metro export passed with the local update-installer module included; Expo Autolinking resolved the Android module successfully
+- This Windows environment has no Java/Android SDK, so the local Kotlin/Gradle build remains for EAS to verify
+- The managed local environment could not download Npgsql from NuGet, so the GitHub backend check must verify the normal restore/build and 17 backend scenarios
 
 SQLite persistence, camera orientation, and final photo placement still require validation inside BlueStacks or on a physical Android device.
 

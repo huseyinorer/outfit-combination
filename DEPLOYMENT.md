@@ -78,7 +78,16 @@ MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combinati
 
 ### Google hesabını etkinleştirme
 
-Hesap özelliği varsayılan olarak kapalıdır; üç ayar birlikte verilmeden backend eski kurulum belirteciyle çalışmaya devam eder. Önce `v1.2.0` APK'sının oluştuğunu ve telefona kurulduğunu doğrula. Ardından Google Cloud Console'da OAuth izin ekranını hazırla ve **Web application** türünde bir OAuth 2.0 istemcisi oluştur. Yetkili dönüş adresi birebir şu olmalı:
+Hesap özelliği varsayılan olarak kapalıdır; üç ayar birlikte verilmeden backend eski kurulum belirteciyle çalışmaya devam eder. Önce `v1.2.0` veya daha yeni APK'nın telefona kurulduğunu doğrula. Ardından Google Cloud Console'da OAuth izin ekranını hazırla ve **Web application** türünde bir OAuth 2.0 istemcisi oluştur. Branding alanlarında şu adresleri kullan:
+
+```text
+Application home page: https://huseyinorer.github.io/outfit-combination/
+Privacy policy: https://huseyinorer.github.io/outfit-combination/privacy.html
+Terms of service: https://huseyinorer.github.io/outfit-combination/terms.html
+Authorized domain: huseyinorer.github.io
+```
+
+**Web application** istemcisinin yetkili dönüş adresi birebir şu olmalı:
 
 ```text
 https://outfit-combination-api.onrender.com/api/account/google/callback
@@ -112,19 +121,23 @@ https://SERVIS-ADIN.onrender.com/api/version
 
 ## 4. BlueStacks'e ilk APK kurulumu
 
-İlk başarılı sürüm iş akışından sonra GitHub deposunda **Releases > v1.0.0 > outfit-combination.apk** dosyasını indir. APK'yı BlueStacks penceresine sürükleyip bırakabilir veya sağdaki **Install APK** düğmesinden seçebilirsin.
+İlk başarılı sürüm iş akışından sonra GitHub deposunda **Releases > en yeni sürüm > outfit-combination.apk** dosyasını indir. APK'yı BlueStacks penceresine sürükleyip bırakabilir veya sağdaki **Install APK** düğmesinden seçebilirsin.
 
-Uygulama daha sonra yeni native sürüm görürse **APK'yı indir** düğmesini gösterir. Normal güncellemeler **Daha sonra** ile ertelenebilir; güvenlik veya uyumluluk nedeniyle Render'daki `MobileUpdate__MinimumVersion` yükseltilirse eski sürüm zorunlu güncellenir. İndirilen APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler.
+`v1.3.0` ve sonraki dahili APK'lar yeni sürümü uygulamanın içinde indirir, ilerlemeyi gösterir ve indirme bitince Android kurulum ekranını açar. Android ilk kullanımda **Bu kaynaktan uygulama yüklemeye izin ver** ayarını ve her güncellemede açık kurulum onayını ister; uygulama güvenlik nedeniyle sessiz kurulum veya otomatik onay yapamaz. `v1.2.0 → v1.3.0` geçişinde eski sürüm bu özelliği henüz içermediği için tarayıcıyla son bir kez güncelleme gerekir.
+
+Normal güncellemeler **Daha sonra** ile ertelenebilir; güvenlik veya uyumluluk nedeniyle Render'daki `MobileUpdate__MinimumVersion` yükseltilirse eski sürüm zorunlu güncellenir. APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler. Google Play için üretilen `production` profili `REQUEST_INSTALL_PACKAGES` iznini bilinçli olarak içermez; mağaza dağıtımında güncellemeler Play üzerinden yapılmalıdır.
 
 ## 5. Gizlilik politikasını yayınlama
 
-Depo ayarlarında **Settings > Pages > Build and deployment > Source** alanını **GitHub Actions** yap. `main` dalına `privacy-site/` değişikliği geldiğinde `Publish privacy policy` workflow'u politikayı otomatik yayımlar:
+Depo ayarlarında **Settings > Pages > Build and deployment > Source** alanını **GitHub Actions** yap. `main` dalına `privacy-site/` değişikliği geldiğinde `Publish privacy policy` workflow'u uygulama sayfasını ve yasal metinleri otomatik yayımlar:
 
 ```text
 https://huseyinorer.github.io/outfit-combination/
+https://huseyinorer.github.io/outfit-combination/privacy.html
+https://huseyinorer.github.io/outfit-combination/terms.html
 ```
 
-Bu adresi Play Console gizlilik politikası alanına yaz. Uygulamanın Ayarlar ekranı da aynı adrese gider. Mağaza başvurusundan önce geliştirici unvanını ve iletişim yöntemini `privacy-site/index.html`, uygulama içi politika ve Play Console ile birebir eşleştir. Data Safety cevap taslağı `docs/PLAY_DATA_SAFETY_TR.md` dosyasındadır.
+Play Console gizlilik politikası alanına `privacy.html` adresini yaz. Uygulamanın Ayarlar ekranı da aynı adrese gider. Mağaza başvurusundan önce geliştirici unvanını ve iletişim yöntemini `privacy-site/privacy.html`, uygulama içi politika ve Play Console ile birebir eşleştir. Data Safety cevap taslağı `docs/PLAY_DATA_SAFETY_TR.md` dosyasındadır.
 
 ## 6. Neon ne zaman gerekir?
 

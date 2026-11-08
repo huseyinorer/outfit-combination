@@ -5,8 +5,8 @@ import { colors, radius, spacing } from '../theme/theme';
 
 const steps = [
   ['1', 'Dolabını oluştur', 'Kameradan veya galeriden kendi kıyafetlerini ekle. Galeriden aynı kategoride 20 fotoğrafa kadar kuyruk oluşturabilirsin.'],
-  ['2', 'Kontrol sende', 'Fotoğraflar cihazında kalır. Gerçek AI’a veri göndermeden önce ne paylaşılacağını görür ve açıkça karar verirsin.'],
-  ['3', 'Gerçek parçalarla kombin', 'En az bir üst, alt ve ayakkabı eklediğinde kendi dolabından farklı kombinler hazırlanır. Backend kapalıysa yerel motor çalışır.'],
+  ['2', 'Kontrol sende', 'Asıl fotoğrafların cihazında kalır. Otomatik tanımayı kullanmadan önce ne paylaşılacağını görür ve açıkça karar verirsin.'],
+  ['3', 'Gerçek parçalarla kombin', 'En az bir üst, alt ve ayakkabı eklediğinde kendi dolabından farklı kombinler hazırlanır. İnternet olmasa bile temel öneriler cihazında çalışır.'],
 ] as const;
 
 export function OnboardingScreen({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {

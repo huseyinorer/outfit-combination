@@ -1,9 +1,9 @@
 export const AI_CONSENT_VERSION = '2026-11-07-v2';
-export const PRIVACY_POLICY_VERSION = '2026-11-07';
+export const PRIVACY_POLICY_VERSION = '2026-11-08';
 export const PRIVACY_CONTACT_URL = 'https://github.com/huseyinorer/outfit-combination/issues';
 
 export const AI_DISCLOSURE =
-  'AI ile kıyafet analizi istediğinde seçtiğin küçültülmüş fotoğraf backend sunucusuna ve yurt dışında hizmet verebilen OpenAI API’ye gönderilir. AI kombin önerisinde fotoğraf veya dosya yolu gönderilmez; yalnızca seçimlerin ve kıyafetlerin yazılı özellikleri gönderilir. Kalıcı kıyafet fotoğrafı telefonunda tutulur. Onayını Ayarlar’dan geri çekebilirsin.';
+  'Fotoğrafla otomatik tanımayı kullandığında seçtiğin küçültülmüş görüntü, kıyafetin özelliklerini belirlemek için hizmet sağlayıcılarımız tarafından işlenir. Kombin önerilerinde fotoğrafın gönderilmez; yalnızca tercihlerin ve kaydettiğin kıyafet bilgileri kullanılır. Dolabındaki asıl fotoğraflar telefonunda kalır. Bu izni dilediğin zaman kapatabilirsin.';
 
 export const PRIVACY_SECTIONS = [
   {

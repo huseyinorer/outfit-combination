@@ -116,7 +116,7 @@ export function SettingsScreen(props: Props) {
   const confirmDeleteAccount = () => {
     Alert.alert(
       'Hesabı kalıcı olarak sil',
-      'Google bağlantın ve sunucudaki profil bilgilerin silinecek. Telefondaki dolabın silinmez. Kötüye kullanımı önlemek için profilden ayrılmış AI sayaçları en fazla 13 ay tutulabilir.',
+      'Google bağlantın ve hesap profilin silinecek. Telefonundaki dolabın ve fotoğrafların etkilenmez. Kullanım sınırlarının kötüye kullanılmasını önlemek için kimliğinle ilişkilendirilmeyen kullanım kayıtları en fazla 13 ay saklanabilir.',
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
@@ -193,22 +193,25 @@ export function SettingsScreen(props: Props) {
         <ContentFrame maxWidth={760} style={styles.content}>
           <View style={styles.card}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>AI özellikleri</Text>
+              <Text style={styles.title}>Akıllı özellikler</Text>
               <View style={[styles.statusBadge, props.aiConsentGranted && styles.statusBadgeActive]}>
                 <Text style={[styles.statusText, props.aiConsentGranted && styles.statusTextActive]}>
-                  {props.aiConsentGranted ? 'Onay açık' : 'Onay kapalı'}
+                  {props.aiConsentGranted ? 'İzin açık' : 'İzin kapalı'}
                 </Text>
               </View>
             </View>
             <Text style={styles.text}>{AI_DISCLOSURE}</Text>
             <Notice>
-              AI onayı kapalıyken kıyafetleri elle kaydedebilir ve kombinleri telefonda ücretsiz hazırlayabilirsin.
+              Bu izin kapalıyken kıyafetlerini elle kaydedebilir ve kombinlerini telefonunda ücretsiz hazırlayabilirsin.
             </Notice>
             {props.aiConsentGranted ? (
-              <SecondaryButton title="AI onayını geri çek" onPress={() => void revokeConsent()} disabled={privacyBusy} />
+              <SecondaryButton title="Akıllı özellik iznini kapat" onPress={() => void revokeConsent()} disabled={privacyBusy} />
             ) : (
-              <PrimaryButton title="AI paylaşımına onay ver" onPress={() => void grantConsent()} loading={privacyBusy} />
+              <PrimaryButton title="Akıllı özelliklere izin ver" onPress={() => void grantConsent()} loading={privacyBusy} />
             )}
+            <Pressable accessibilityRole="button" onPress={props.onPrivacy} hitSlop={8}>
+              <Text style={styles.inlineLink}>Verilerinin nasıl kullanıldığını gör</Text>
+            </Pressable>
           </View>
 
           {props.account.enabled ? (
@@ -230,7 +233,7 @@ export function SettingsScreen(props: Props) {
                   {props.account.usage ? (
                     <View style={styles.usageGrid}>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>FOTOĞRAF ANALİZİ</Text>
+                        <Text style={styles.usageLabel}>FOTOĞRAF TANIMA</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyAnalysisLimit - props.account.usage.dailyAnalysisUsed,
@@ -242,7 +245,7 @@ export function SettingsScreen(props: Props) {
                         </Text>
                       </View>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>AI KOMBİN</Text>
+                        <Text style={styles.usageLabel}>KOMBİN ÖNERİSİ</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyOutfitLimit - props.account.usage.dailyOutfitUsed,
@@ -261,7 +264,7 @@ export function SettingsScreen(props: Props) {
                 </>
               ) : (
                 <>
-                  <Text style={styles.text}>AI kullanım haklarını hesabına bağlamak ve uygulamayı yeniden kurduğunda korumak için Google ile giriş yap.</Text>
+                  <Text style={styles.text}>Akıllı özellik haklarını hesabında korumak ve farklı kurulumlarda kaybetmemek için Google ile devam et.</Text>
                   <PrimaryButton title="Google ile giriş yap" onPress={() => void signIn()} loading={accountBusy} />
                 </>
               )}
@@ -270,8 +273,8 @@ export function SettingsScreen(props: Props) {
 
           <View style={styles.card}>
             <Text style={styles.title}>Gizlilik ve veriler</Text>
-            <Text style={styles.text}>Fotoğrafların ve dolabın bu cihazın özel uygulama alanında tutulur.</Text>
-            <SecondaryButton title="Gizlilik politikasını aç" onPress={props.onPrivacy} />
+            <Text style={styles.text}>Dolabın ve asıl kıyafet fotoğrafların yalnızca bu cihazın uygulamaya ayrılmış alanında tutulur.</Text>
+            <SecondaryButton title="Gizlilik politikasını görüntüle" onPress={props.onPrivacy} />
             <Text style={styles.deleteHint}>Aşağıdaki işlem yalnızca bu cihazdaki verileri siler ve geri alınamaz.</Text>
             <DangerButton title="Tüm yerel verilerimi sil" onPress={confirmDeleteAll} disabled={privacyBusy} />
           </View>
@@ -359,6 +362,7 @@ const styles = StyleSheet.create({
   statusBadgeActive: { backgroundColor: colors.primarySoft },
   statusText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   statusTextActive: { color: colors.primary },
+  inlineLink: { color: colors.primary, fontSize: 14, fontWeight: '800', textAlign: 'center' },
   deleteHint: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   infoLabel: { color: colors.muted, fontSize: 14 },

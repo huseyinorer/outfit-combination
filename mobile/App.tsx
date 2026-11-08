@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, AppState, BackHandler, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  BackHandler,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StatusBar as NativeStatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Constants from 'expo-constants';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateGate } from './src/components/UpdateGate';
@@ -311,7 +323,7 @@ export default function App() {
   const revokeAiConsent = async () => {
     await deleteSetting('ai_consent_version');
     setAiConsentGranted(false);
-    tactileSuccess('AI paylaşım onayı geri çekildi.');
+    tactileSuccess('Akıllı özellik izni kapatıldı.');
   };
 
   const requestAiConsent = async (): Promise<boolean> => {
@@ -324,12 +336,12 @@ export default function App() {
         resolve(value);
       };
       Alert.alert(
-        'AI veri paylaşımı',
+        'Akıllı özelliklere izin ver',
         AI_DISCLOSURE,
         [
-          { text: 'Yerel devam et', style: 'cancel', onPress: () => finish(false) },
+          { text: 'Yalnızca telefonda devam et', style: 'cancel', onPress: () => finish(false) },
           {
-            text: 'Kabul et',
+            text: 'İzin ver',
             onPress: () => {
               finish(true);
               void grantAiConsent().catch(() => {
@@ -547,8 +559,10 @@ export default function App() {
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onSettings={() => setScreen({ name: 'settings' })}
+          onSignIn={connectAccount}
           onFavorites={() => setScreen({ name: 'favorites' })}
           favoriteCount={favorites.length}
+          account={account}
         />
       );
   }
@@ -577,7 +591,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
+  safeArea: {
+    flex: 1,
+    paddingTop: Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 24 : 0,
+    backgroundColor: colors.background,
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28, backgroundColor: colors.background },
   loading: { color: colors.text, fontSize: 16, fontWeight: '700' },
   errorTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },

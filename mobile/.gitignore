@@ -5,8 +5,9 @@ node_modules/
 .expo/
 dist/
 web-build/
-android/
-ios/
+/.codex-export/
+/android/
+/ios/
 
 # Local secrets and machine-specific settings
 .env
@@ -22,5 +23,3 @@ ios/
 Thumbs.db
 .idea/
 .vscode/
-
-node_modules

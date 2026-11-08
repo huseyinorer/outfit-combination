@@ -1,6 +1,20 @@
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  AppState,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { MobileVersionInfo, VersionDecision } from '../domain/version';
-import { colors } from '../theme/theme';
+import { downloadApk, isDirectApkInstallAvailable, launchApkInstaller } from '../services/apkUpdate';
+import { colors, radius, spacing } from '../theme/theme';
+
+type UpdatePhase = 'idle' | 'downloading' | 'permission' | 'installer' | 'error';
 
 interface UpdateGateProps {
   currentVersion: string;
@@ -10,6 +24,10 @@ interface UpdateGateProps {
   onDismiss: () => void;
 }
 
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function UpdateGate({
   currentVersion,
   info,
@@ -17,43 +35,197 @@ export function UpdateGate({
   dismissed,
   onDismiss,
 }: UpdateGateProps) {
-  const visible = Boolean(
-    info?.androidDownloadUrl &&
-      decision?.updateAvailable &&
-      (!dismissed || decision.updateRequired),
+  const [phase, setPhase] = useState<UpdatePhase>('idle');
+  const [fraction, setFraction] = useState<number | null>(0);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [canInstallDirectly, setCanInstallDirectly] = useState<boolean | null>(
+    Platform.OS === 'android' ? null : false,
   );
+  const contentUriRef = useRef<string | null>(null);
+  const leftForPermissionRef = useRef(false);
+  const visible = Boolean(
+    info?.androidDownloadUrl
+      && decision?.updateAvailable
+      && (!dismissed || decision.updateRequired),
+  );
+
+  const openInstaller = useCallback(async (contentUri: string, openSettingsWhenMissing: boolean) => {
+    try {
+      const result = await launchApkInstaller(contentUri, openSettingsWhenMissing);
+      setPhase(result === 'opened' ? 'installer' : 'permission');
+      if (result === 'permission-required') {
+        leftForPermissionRef.current = AppState.currentState !== 'active';
+      }
+    } catch (installError) {
+      setError(installError instanceof Error ? installError.message : 'Kurulum ekranı açılamadı.');
+      setPhase('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      void isDirectApkInstallAvailable().then(setCanInstallDirectly).catch(() => setCanInstallDirectly(false));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'permission') return undefined;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'inactive' || state === 'background') leftForPermissionRef.current = true;
+      if (state === 'active' && leftForPermissionRef.current && contentUriRef.current) {
+        leftForPermissionRef.current = false;
+        void openInstaller(contentUriRef.current, false);
+      }
+    });
+    return () => subscription.remove();
+  }, [openInstaller, phase]);
+
+  useEffect(() => {
+    setPhase('idle');
+    setFraction(0);
+    setDownloadedBytes(0);
+    setTotalBytes(null);
+    setError(null);
+    contentUriRef.current = null;
+  }, [info?.latestVersion]);
 
   if (!info || !decision) return null;
 
-  const openDownload = async () => {
-    if (info.androidDownloadUrl) await Linking.openURL(info.androidDownloadUrl);
+  const startUpdate = async () => {
+    if (!info.androidDownloadUrl) return;
+    if (canInstallDirectly === null) return;
+    if (!canInstallDirectly) {
+      try {
+        await Linking.openURL(info.androidDownloadUrl);
+      } catch {
+        setError('Güncelleme bağlantısı açılamadı. İnternet bağlantını kontrol edip yeniden dene.');
+        setPhase('error');
+      }
+      return;
+    }
+
+    setError(null);
+    setFraction(0);
+    setDownloadedBytes(0);
+    setTotalBytes(null);
+    setPhase('downloading');
+    try {
+      const contentUri = await downloadApk(info.androidDownloadUrl, info.latestVersion, (progress) => {
+        setFraction(progress.fraction);
+        setDownloadedBytes(progress.bytesWritten);
+        setTotalBytes(progress.totalBytes);
+      });
+      contentUriRef.current = contentUri;
+      setFraction(1);
+      await openInstaller(contentUri, true);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'Güncelleme indirilemedi.');
+      setPhase('error');
+    }
   };
+
+  const retryInstaller = () => {
+    if (contentUriRef.current) void openInstaller(contentUriRef.current, true);
+    else void startUpdate();
+  };
+
+  const busy = phase === 'downloading';
+  const closeAllowed = !decision.updateRequired && !busy;
+  const progressLabel = totalBytes
+    ? `${formatMegabytes(downloadedBytes)} / ${formatMegabytes(totalBytes)}`
+    : downloadedBytes > 0
+      ? `${formatMegabytes(downloadedBytes)} indirildi`
+      : 'İndirme hazırlanıyor…';
 
   return (
     <Modal
       animationType="fade"
+      navigationBarTranslucent
+      statusBarTranslucent
       transparent
       visible={visible}
-      onRequestClose={decision.updateRequired ? undefined : onDismiss}
+      onRequestClose={closeAllowed ? onDismiss : () => undefined}
     >
       <View style={styles.overlay}>
-        <View style={styles.card}>
+        <View accessibilityViewIsModal style={styles.card}>
           <Text style={styles.eyebrow}>YENİ SÜRÜM</Text>
           <Text style={styles.title}>
-            {decision.updateRequired ? 'Devam etmek için güncelle' : 'Güncelleme hazır'}
+            {decision.updateRequired ? 'Güncelleme gerekli' : 'Yeni sürüm hazır'}
           </Text>
-          <Text style={styles.body}>
-            Telefonundaki sürüm {currentVersion}, yeni sürüm {info.latestVersion}. APK'yı indirip
-            mevcut uygulamanın üzerine kurabilirsin; dolabındaki kayıtlar silinmez.
-          </Text>
-          <Pressable style={styles.primaryButton} onPress={openDownload}>
-            <Text style={styles.primaryLabel}>APK'yı indir</Text>
-          </Pressable>
-          {!decision.updateRequired && (
+
+          {phase === 'downloading' ? (
+            <>
+              <Text style={styles.body}>Güncelleme uygulamadan çıkmadan indiriliyor.</Text>
+              <View
+                accessibilityRole="progressbar"
+                accessibilityValue={{ min: 0, max: 100, now: Math.round((fraction ?? 0) * 100) }}
+                style={styles.progressTrack}
+              >
+                <View style={[styles.progressFill, { width: `${Math.round((fraction ?? 0) * 100)}%` }]} />
+              </View>
+              <View style={styles.progressRow}>
+                <Text style={styles.progressText}>{progressLabel}</Text>
+                {fraction === null ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.progressPercent}>{Math.round(fraction * 100)}%</Text>
+                )}
+              </View>
+            </>
+          ) : phase === 'permission' ? (
+            <>
+              <Text style={styles.body}>
+                Android, ilk uygulama içi güncellemede bu kaynaktan kuruluma izin vermeni ister.
+                İzni açıp geri döndüğünde kurulum otomatik devam eder.
+              </Text>
+              <Pressable style={styles.primaryButton} onPress={retryInstaller}>
+                <Text style={styles.primaryLabel}>İzin ekranını yeniden aç</Text>
+              </Pressable>
+            </>
+          ) : phase === 'installer' ? (
+            <>
+              <Text style={styles.body}>
+                Güncelleme indirildi. Android kurulum ekranında “Güncelle” seçeneğine dokunarak işlemi tamamla.
+              </Text>
+              <Pressable style={styles.primaryButton} onPress={retryInstaller}>
+                <Text style={styles.primaryLabel}>Kurulum ekranını aç</Text>
+              </Pressable>
+            </>
+          ) : phase === 'error' ? (
+            <>
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error ?? 'Güncelleme tamamlanamadı.'}</Text>
+              </View>
+              <Pressable style={styles.primaryButton} onPress={() => void startUpdate()}>
+                <Text style={styles.primaryLabel}>Yeniden dene</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={styles.body}>
+                Sürüm {info.latestVersion} hazır. Güncelleme indirildikten sonra Android yalnızca kurulum onayını isteyecek;
+                dolabın ve fotoğrafların korunacak.
+              </Text>
+              <Pressable
+                disabled={canInstallDirectly === null}
+                style={[styles.primaryButton, canInstallDirectly === null && styles.disabledButton]}
+                onPress={() => void startUpdate()}
+              >
+                <Text style={styles.primaryLabel}>
+                  {canInstallDirectly === null ? 'Hazırlanıyor…' : canInstallDirectly ? 'Güncelle' : 'Güncellemeyi aç'}
+                </Text>
+              </Pressable>
+            </>
+          )}
+
+          {closeAllowed ? (
             <Pressable style={styles.secondaryButton} onPress={onDismiss}>
               <Text style={styles.secondaryLabel}>Daha sonra</Text>
             </Pressable>
-          )}
+          ) : null}
+          <Text style={styles.versionText}>Yüklü sürüm {currentVersion}</Text>
         </View>
       </View>
     </Modal>
@@ -65,28 +237,37 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    backgroundColor: 'rgba(24, 23, 20, 0.62)',
+    padding: spacing.lg,
+    backgroundColor: 'rgba(24, 23, 20, 0.68)',
   },
   card: {
     width: '100%',
     maxWidth: 420,
-    gap: 14,
-    padding: 24,
-    borderRadius: 24,
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
     backgroundColor: colors.surface,
   },
   eyebrow: { color: colors.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2 },
   title: { color: colors.text, fontSize: 24, fontWeight: '900' },
   body: { color: colors.muted, fontSize: 15, lineHeight: 22 },
+  progressTrack: { height: 10, overflow: 'hidden', borderRadius: 8, backgroundColor: colors.primarySoft },
+  progressFill: { height: '100%', borderRadius: 8, backgroundColor: colors.primary },
+  progressRow: { minHeight: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  progressText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
+  progressPercent: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  errorBox: { borderRadius: radius.sm, padding: spacing.md, backgroundColor: '#F8E2DF' },
+  errorText: { color: colors.danger, fontSize: 14, lineHeight: 20 },
   primaryButton: {
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    borderRadius: radius.md,
     backgroundColor: colors.primary,
   },
-  primaryLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
-  secondaryButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  primaryLabel: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  disabledButton: { opacity: 0.55 },
+  secondaryButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryLabel: { color: colors.text, fontSize: 15, fontWeight: '800' },
+  versionText: { color: colors.muted, fontSize: 12, textAlign: 'center' },
 });

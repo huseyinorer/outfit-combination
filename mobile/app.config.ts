@@ -3,6 +3,7 @@ import appVersion from './app-version.json';
 
 const easProjectId = '59dce122-82ee-47b4-a212-64ff019c662b';
 const appEnvironment = process.env.EXPO_PUBLIC_APP_ENV ?? 'development';
+const directApkUpdatesEnabled = process.env.EXPO_PUBLIC_DIRECT_APK_UPDATES === 'true';
 
 const config: ExpoConfig = {
   name: 'Outfit Combination',
@@ -14,7 +15,11 @@ const config: ExpoConfig = {
   userInterfaceStyle: 'light',
   android: {
     package: 'com.krofosyonel.outfitcombination',
-    permissions: ['CAMERA', 'READ_MEDIA_IMAGES'],
+    permissions: [
+      'CAMERA',
+      'READ_MEDIA_IMAGES',
+      ...(directApkUpdatesEnabled ? ['android.permission.REQUEST_INSTALL_PACKAGES'] : []),
+    ],
     softwareKeyboardLayoutMode: 'resize',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
@@ -52,7 +57,7 @@ const config: ExpoConfig = {
   extra: {
     apiBaseUrl: process.env.EXPO_PUBLIC_API_URL ?? '',
     privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL
-      ?? 'https://huseyinorer.github.io/outfit-combination/',
+      ?? 'https://huseyinorer.github.io/outfit-combination/privacy.html',
     appEnvironment,
     internalTools: process.env.EXPO_PUBLIC_INTERNAL_TOOLS === 'true' || appEnvironment === 'development',
     eas: {
