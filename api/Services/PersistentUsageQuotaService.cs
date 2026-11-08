@@ -41,13 +41,20 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         string subjectId,
         AiOperation operation,
         CancellationToken cancellationToken)
+        => await TryConsumeAsync(subjectId, null, operation, cancellationToken);
+
+    public async Task<QuotaDecision> TryConsumeAsync(
+        string primarySubjectId,
+        string? secondarySubjectId,
+        AiOperation operation,
+        CancellationToken cancellationToken)
     {
+        var subjects = ParseSubjects(primarySubjectId, secondarySubjectId);
+        if (subjects.Count == 0) return new QuotaDecision(QuotaStatus.Unavailable);
         if (dataSource is null)
             return developmentFallback
-                ? TryConsumeInMemory(subjectId, operation)
+                ? TryConsumeInMemory(subjects, operation)
                 : new QuotaDecision(QuotaStatus.Unavailable);
-        if (!Guid.TryParse(subjectId, out var subjectGuid))
-            return new QuotaDecision(QuotaStatus.Unavailable);
 
         try
         {
@@ -55,12 +62,13 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-            await using (var lockCommand = new NpgsqlCommand(
-                "SELECT pg_advisory_xact_lock(hashtextextended(@installation, 0));",
-                connection,
-                transaction))
+            foreach (var subject in subjects)
             {
-                lockCommand.Parameters.AddWithValue("installation", subjectId);
+                await using var lockCommand = new NpgsqlCommand(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(@subject, 0));",
+                    connection,
+                    transaction);
+                lockCommand.Parameters.AddWithValue("subject", subject.ToString());
                 await lockCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -68,18 +76,29 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
             var month = new DateOnly(today.Year, today.Month, 1);
             var (dailyLimit, monthlyLimit) = Limits(operation);
 
-            var dailyUsed = await ReadCountAsync(connection, transaction, subjectGuid, "day", today, operation, cancellationToken);
-            var monthlyUsed = await ReadCountAsync(connection, transaction, subjectGuid, "month", month, operation, cancellationToken);
-            if (dailyUsed >= dailyLimit || monthlyUsed >= monthlyLimit)
+            var counts = new List<(Guid Subject, int Daily, int Monthly)>(subjects.Count);
+            foreach (var subject in subjects)
             {
-                await transaction.RollbackAsync(cancellationToken);
-                return new QuotaDecision(QuotaStatus.Exceeded, dailyUsed, monthlyUsed);
+                var daily = await ReadCountAsync(connection, transaction, subject, "day", today, operation, cancellationToken);
+                var monthly = await ReadCountAsync(connection, transaction, subject, "month", month, operation, cancellationToken);
+                counts.Add((subject, daily, monthly));
             }
 
-            await IncrementAsync(connection, transaction, subjectGuid, "day", today, operation, cancellationToken);
-            await IncrementAsync(connection, transaction, subjectGuid, "month", month, operation, cancellationToken);
+            var effectiveDaily = counts.Max(value => value.Daily);
+            var effectiveMonthly = counts.Max(value => value.Monthly);
+            if (counts.Any(value => value.Daily >= dailyLimit || value.Monthly >= monthlyLimit))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return new QuotaDecision(QuotaStatus.Exceeded, effectiveDaily, effectiveMonthly);
+            }
+
+            foreach (var subject in subjects)
+            {
+                await IncrementAsync(connection, transaction, subject, "day", today, operation, cancellationToken);
+                await IncrementAsync(connection, transaction, subject, "month", month, operation, cancellationToken);
+            }
             await transaction.CommitAsync(cancellationToken);
-            return new QuotaDecision(QuotaStatus.Allowed, dailyUsed + 1, monthlyUsed + 1);
+            return new QuotaDecision(QuotaStatus.Allowed, effectiveDaily + 1, effectiveMonthly + 1);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -89,9 +108,16 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
     }
 
     public async Task<UsageSnapshot?> GetSnapshotAsync(string subjectId, CancellationToken cancellationToken)
+        => await GetSnapshotAsync(subjectId, null, cancellationToken);
+
+    public async Task<UsageSnapshot?> GetSnapshotAsync(
+        string primarySubjectId,
+        string? secondarySubjectId,
+        CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(subjectId, out var subjectGuid)) return null;
-        if (dataSource is null) return developmentFallback ? SnapshotInMemory(subjectId) : null;
+        var subjects = ParseSubjects(primarySubjectId, secondarySubjectId);
+        if (subjects.Count == 0) return null;
+        if (dataSource is null) return developmentFallback ? SnapshotInMemory(subjects) : null;
 
         try
         {
@@ -100,10 +126,17 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var month = new DateOnly(today.Year, today.Month, 1);
-            var dailyAnalysis = await ReadCountAsync(connection, transaction, subjectGuid, "day", today, AiOperation.Analysis, cancellationToken);
-            var monthlyAnalysis = await ReadCountAsync(connection, transaction, subjectGuid, "month", month, AiOperation.Analysis, cancellationToken);
-            var dailyOutfit = await ReadCountAsync(connection, transaction, subjectGuid, "day", today, AiOperation.Outfit, cancellationToken);
-            var monthlyOutfit = await ReadCountAsync(connection, transaction, subjectGuid, "month", month, AiOperation.Outfit, cancellationToken);
+            var dailyAnalysis = 0;
+            var monthlyAnalysis = 0;
+            var dailyOutfit = 0;
+            var monthlyOutfit = 0;
+            foreach (var subject in subjects)
+            {
+                dailyAnalysis = Math.Max(dailyAnalysis, await ReadCountAsync(connection, transaction, subject, "day", today, AiOperation.Analysis, cancellationToken));
+                monthlyAnalysis = Math.Max(monthlyAnalysis, await ReadCountAsync(connection, transaction, subject, "month", month, AiOperation.Analysis, cancellationToken));
+                dailyOutfit = Math.Max(dailyOutfit, await ReadCountAsync(connection, transaction, subject, "day", today, AiOperation.Outfit, cancellationToken));
+                monthlyOutfit = Math.Max(monthlyOutfit, await ReadCountAsync(connection, transaction, subject, "month", month, AiOperation.Outfit, cancellationToken));
+            }
             await transaction.CommitAsync(cancellationToken);
             var analysisLimits = Limits(AiOperation.Analysis);
             var outfitLimits = Limits(AiOperation.Outfit);
@@ -125,11 +158,19 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
     }
 
     public async Task RefundAsync(string subjectId, AiOperation operation, CancellationToken cancellationToken)
+        => await RefundAsync(subjectId, null, operation, cancellationToken);
+
+    public async Task RefundAsync(
+        string primarySubjectId,
+        string? secondarySubjectId,
+        AiOperation operation,
+        CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(subjectId, out var subjectGuid)) return;
+        var subjects = ParseSubjects(primarySubjectId, secondarySubjectId);
+        if (subjects.Count == 0) return;
         if (dataSource is null)
         {
-            if (developmentFallback) RefundInMemory(subjectId, operation);
+            if (developmentFallback) RefundInMemory(subjects, operation);
             return;
         }
 
@@ -138,19 +179,23 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
             await EnsureInitializedAsync(cancellationToken);
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using (var lockCommand = new NpgsqlCommand(
-                "SELECT pg_advisory_xact_lock(hashtextextended(@subject, 0));",
-                connection,
-                transaction))
+            foreach (var subject in subjects)
             {
-                lockCommand.Parameters.AddWithValue("subject", subjectId);
+                await using var lockCommand = new NpgsqlCommand(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(@subject, 0));",
+                    connection,
+                    transaction);
+                lockCommand.Parameters.AddWithValue("subject", subject.ToString());
                 await lockCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var month = new DateOnly(today.Year, today.Month, 1);
-            await DecrementAsync(connection, transaction, subjectGuid, "day", today, operation, cancellationToken);
-            await DecrementAsync(connection, transaction, subjectGuid, "month", month, operation, cancellationToken);
+            foreach (var subject in subjects)
+            {
+                await DecrementAsync(connection, transaction, subject, "day", today, operation, cancellationToken);
+                await DecrementAsync(connection, transaction, subject, "month", month, operation, cancellationToken);
+            }
             await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception error) when (error is not OperationCanceledException)
@@ -159,31 +204,40 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         }
     }
 
-    private QuotaDecision TryConsumeInMemory(string installationId, AiOperation operation)
+    private QuotaDecision TryConsumeInMemory(IReadOnlyList<Guid> subjects, AiOperation operation)
     {
-        if (!Guid.TryParse(installationId, out _)) return new QuotaDecision(QuotaStatus.Unavailable);
         var now = DateTime.UtcNow;
         var operationKey = operation == AiOperation.Analysis ? "analysis" : "outfit";
-        var dailyKey = $"{installationId}:day:{now:yyyy-MM-dd}:{operationKey}";
-        var monthlyKey = $"{installationId}:month:{now:yyyy-MM}:{operationKey}";
         var dailyLimit = operation == AiOperation.Analysis ? options.DailyAnalysisLimit : options.DailyOutfitLimit;
         var monthlyLimit = operation == AiOperation.Analysis ? options.MonthlyAnalysisLimit : options.MonthlyOutfitLimit;
         lock (memoryLock)
         {
-            var daily = memoryCounts.GetValueOrDefault(dailyKey);
-            var monthly = memoryCounts.GetValueOrDefault(monthlyKey);
-            if (daily >= dailyLimit || monthly >= monthlyLimit)
-                return new QuotaDecision(QuotaStatus.Exceeded, daily, monthly);
-            memoryCounts[dailyKey] = daily + 1;
-            memoryCounts[monthlyKey] = monthly + 1;
-            return new QuotaDecision(QuotaStatus.Allowed, daily + 1, monthly + 1);
+            var counts = subjects.Select(subject =>
+            {
+                var dailyKey = $"{subject}:day:{now:yyyy-MM-dd}:{operationKey}";
+                var monthlyKey = $"{subject}:month:{now:yyyy-MM}:{operationKey}";
+                return (DailyKey: dailyKey, MonthlyKey: monthlyKey,
+                    Daily: memoryCounts.GetValueOrDefault(dailyKey),
+                    Monthly: memoryCounts.GetValueOrDefault(monthlyKey));
+            }).ToArray();
+            var effectiveDaily = counts.Max(value => value.Daily);
+            var effectiveMonthly = counts.Max(value => value.Monthly);
+            if (counts.Any(value => value.Daily >= dailyLimit || value.Monthly >= monthlyLimit))
+                return new QuotaDecision(QuotaStatus.Exceeded, effectiveDaily, effectiveMonthly);
+            foreach (var count in counts)
+            {
+                memoryCounts[count.DailyKey] = count.Daily + 1;
+                memoryCounts[count.MonthlyKey] = count.Monthly + 1;
+            }
+            return new QuotaDecision(QuotaStatus.Allowed, effectiveDaily + 1, effectiveMonthly + 1);
         }
     }
 
-    private UsageSnapshot SnapshotInMemory(string subjectId)
+    private UsageSnapshot SnapshotInMemory(IReadOnlyList<Guid> subjects)
     {
         var now = DateTime.UtcNow;
-        int Count(string period, string operation) => memoryCounts.GetValueOrDefault($"{subjectId}:{period}:{(period == "day" ? $"{now:yyyy-MM-dd}" : $"{now:yyyy-MM}")}:{operation}");
+        int Count(string period, string operation) => subjects.Max(subject =>
+            memoryCounts.GetValueOrDefault($"{subject}:{period}:{(period == "day" ? $"{now:yyyy-MM-dd}" : $"{now:yyyy-MM}")}:{operation}"));
         var analysisLimits = Limits(AiOperation.Analysis);
         var outfitLimits = Limits(AiOperation.Outfit);
         return new UsageSnapshot(
@@ -193,17 +247,32 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
             Count("month", "outfit"), outfitLimits.Monthly);
     }
 
-    private void RefundInMemory(string subjectId, AiOperation operation)
+    private void RefundInMemory(IReadOnlyList<Guid> subjects, AiOperation operation)
     {
         var now = DateTime.UtcNow;
         var operationKey = operation == AiOperation.Analysis ? "analysis" : "outfit";
-        var dailyKey = $"{subjectId}:day:{now:yyyy-MM-dd}:{operationKey}";
-        var monthlyKey = $"{subjectId}:month:{now:yyyy-MM}:{operationKey}";
         lock (memoryLock)
         {
-            if (memoryCounts.GetValueOrDefault(dailyKey) > 0) memoryCounts[dailyKey]--;
-            if (memoryCounts.GetValueOrDefault(monthlyKey) > 0) memoryCounts[monthlyKey]--;
+            foreach (var subject in subjects)
+            {
+                var dailyKey = $"{subject}:day:{now:yyyy-MM-dd}:{operationKey}";
+                var monthlyKey = $"{subject}:month:{now:yyyy-MM}:{operationKey}";
+                if (memoryCounts.GetValueOrDefault(dailyKey) > 0) memoryCounts[dailyKey]--;
+                if (memoryCounts.GetValueOrDefault(monthlyKey) > 0) memoryCounts[monthlyKey]--;
+            }
         }
+    }
+
+    private static IReadOnlyList<Guid> ParseSubjects(string primarySubjectId, string? secondarySubjectId)
+    {
+        var values = new[] { primarySubjectId, secondarySubjectId }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => Guid.TryParse(value, out var parsed) ? parsed : Guid.Empty)
+            .Where(value => value != Guid.Empty)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToArray();
+        return values;
     }
 
     private (int Daily, int Monthly) Limits(AiOperation operation)

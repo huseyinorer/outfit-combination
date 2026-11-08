@@ -14,9 +14,10 @@ const NORMAL_COLORS = new Set([
   'lacivert',
   'kahverengi',
   'ekru',
+  'black', 'white', 'gray', 'grey', 'beige', 'cream', 'navy', 'brown', 'ecru',
 ]);
-const LIGHT_COLORS = new Set(['beyaz', 'bej', 'krem', 'ekru', 'açık mavi', 'pudra', 'sarı']);
-const DARK_COLORS = new Set(['siyah', 'lacivert', 'antrasit', 'bordo', 'koyu gri', 'kahverengi']);
+const LIGHT_COLORS = new Set(['beyaz', 'bej', 'krem', 'ekru', 'açık mavi', 'pudra', 'sarı', 'white', 'beige', 'cream', 'ecru', 'light blue', 'yellow']);
+const DARK_COLORS = new Set(['siyah', 'lacivert', 'antrasit', 'bordo', 'koyu gri', 'kahverengi', 'black', 'navy', 'charcoal', 'burgundy', 'dark gray', 'dark grey', 'brown']);
 
 const destinationStyles: Record<string, string[]> = {
   'iş/ofis': ['klasik', 'smart casual', 'resmi', 'minimal'],
@@ -24,6 +25,11 @@ const destinationStyles: Record<string, string[]> = {
   'akşam yemeği': ['smart casual', 'klasik', 'şık'],
   'özel gün': ['klasik', 'şık', 'resmi'],
   günlük: ['günlük', 'rahat', 'spor'],
+  daily: ['daily', 'casual', 'relaxed', 'sporty'],
+  'work/office': ['classic', 'smart casual', 'formal', 'minimal'],
+  'meeting friends': ['relaxed', 'smart casual', 'casual', 'sporty'],
+  dinner: ['smart casual', 'classic', 'elegant'],
+  'special occasion': ['classic', 'elegant', 'formal'],
 };
 
 interface Triple {
@@ -81,10 +87,10 @@ function colorScore(items: ClothingItem[], tone: string): number {
   for (let index = 0; index < colors.length; index += 1) {
     const color = colors[index] ?? '';
     if (NORMAL_COLORS.has(color)) score += 0.7;
-    if (tone === 'açık' && LIGHT_COLORS.has(color)) score += 1.8;
-    if (tone === 'koyu' && DARK_COLORS.has(color)) score += 1.8;
+    if ((tone === 'açık' || tone === 'light') && LIGHT_COLORS.has(color)) score += 1.8;
+    if ((tone === 'koyu' || tone === 'dark') && DARK_COLORS.has(color)) score += 1.8;
   }
-  if (tone === 'karışık' && new Set(colors).size > 1) score += 1.5;
+  if ((tone === 'karışık' || tone === 'mixed') && new Set(colors).size > 1) score += 1.5;
   if (new Set(colors).size === 1 && colors.length === 3) score -= 0.5;
   return score;
 }
@@ -94,7 +100,7 @@ function scoreTriple(triple: Omit<Triple, 'score'>, preferences: OutfitPreferenc
   const styles = pieces.flatMap((item) => item.styleTags);
   let score = colorScore(pieces, normalize(preferences.tone));
 
-  if (preferences.look !== 'Fark etmez' && includesAny(styles, [preferences.look])) score += 4;
+  if (!['Fark etmez', 'Any'].includes(preferences.look) && includesAny(styles, [preferences.look])) score += 4;
   const expected = destinationStyles[normalize(preferences.destination)] ?? [];
   if (includesAny(styles, expected)) score += 2.5;
 
@@ -103,16 +109,18 @@ function scoreTriple(triple: Omit<Triple, 'score'>, preferences: OutfitPreferenc
   return score;
 }
 
-function makeLocalSuggestion(triple: Triple): OutfitSuggestion {
+function makeLocalSuggestion(triple: Triple, english: boolean): OutfitSuggestion {
   const colors = [triple.top.primaryColor, triple.bottom.primaryColor, triple.shoes.primaryColor]
     .filter(Boolean)
     .join(', ');
   return {
-    title: `${triple.top.name || 'Üst'} & ${triple.bottom.name || 'Alt'}`,
+    title: `${triple.top.name || (english ? 'Top' : 'Üst')} & ${triple.bottom.name || (english ? 'Bottom' : 'Alt')}`,
     topId: triple.top.id,
     bottomId: triple.bottom.id,
     shoeId: triple.shoes.id,
-    reason: `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`,
+    reason: english
+      ? `${triple.top.name || 'Top'}, ${triple.bottom.name || 'bottom'}, and ${triple.shoes.name || 'shoes'} create a balanced, practical outfit${colors ? ` with ${colors} tones` : ''}.`
+      : `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`,
     source: 'local',
   };
 }
@@ -160,23 +168,31 @@ export function buildLocalSuggestions(
     if (next) selected.push(next);
   }
 
-  return selected.map(makeLocalSuggestion);
+  const english = ['Any', 'Daily', 'Work/office', 'Meeting friends', 'Dinner', 'Special occasion'].includes(preferences.destination);
+  return selected.map((triple) => makeLocalSuggestion(triple, english));
 }
 
 export function completeSuggestions(
   items: ClothingItem[],
   preferences: OutfitPreferences,
   aiCandidates: OutfitSuggestion[] = [],
+  excludedKeys = new Set<string>(),
 ): OutfitSuggestion[] {
   const possible = countPossibleOutfits(items);
   if (possible === 0) return [];
 
   const target = Math.min(3, possible);
   const validAi = validateAiSuggestions(items, aiCandidates)
+    .filter((suggestion) => !excludedKeys.has(outfitKey(suggestion)))
     .slice(0, target)
     .map((suggestion) => ({ ...suggestion, source: 'ai' as const }));
   const seen = new Set(validAi.map(outfitKey));
-  const local = buildLocalSuggestions(items, preferences, seen);
+  const localExcluded = new Set([...excludedKeys, ...seen]);
+  let local = buildLocalSuggestions(items, preferences, localExcluded);
+  if (validAi.length + local.length < target && excludedKeys.size > 0) {
+    local = [...local, ...buildLocalSuggestions(items, preferences, seen)
+      .filter((suggestion) => !local.some((existing) => outfitKey(existing) === outfitKey(suggestion)))];
+  }
   return [...validAi, ...local].slice(0, target);
 }
 

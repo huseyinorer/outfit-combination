@@ -1,13 +1,14 @@
 import React from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { CATEGORY_LABELS, type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
+import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
 import { ClothingActionSheet } from '../components/ClothingActionSheet';
 import { ClothingCard } from '../components/ClothingCard';
 import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import type { AccountState } from '../services/accountAuth';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
-type Filter = 'all' | Category;
+type Filter = 'all' | Category | 'recent' | 'summer' | 'winter';
 
 interface Props {
   items: ClothingItem[];
@@ -21,16 +22,33 @@ interface Props {
   onSettings: () => void;
   onSignIn: () => Promise<void>;
   onFavorites: () => void;
+  onHistory: () => void;
   favoriteCount: number;
   account: AccountState;
 }
 
 export function HomeScreen(props: Props) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
   const [filter, setFilter] = React.useState<Filter>('all');
+  const [search, setSearch] = React.useState('');
   const [menuItem, setMenuItem] = React.useState<ClothingItem | null>(null);
   const [accountBusy, setAccountBusy] = React.useState(false);
-  const visible = filter === 'all' ? props.items : props.items.filter((item) => item.category === filter);
+  const normalizedSearch = search.trim().toLocaleLowerCase(language === 'tr' ? 'tr-TR' : 'en-US');
+  const visible = props.items.filter((item) => {
+    const filterMatches = filter === 'all'
+      || (filter === 'recent' && Date.now() - Date.parse(item.createdAt) <= 30 * 24 * 60 * 60 * 1_000)
+      || (filter === 'summer' && item.seasons.some((season) => /yaz|summer/i.test(season)))
+      || (filter === 'winter' && item.seasons.some((season) => /kış|kis|winter/i.test(season)))
+      || item.category === filter;
+    if (!filterMatches) return false;
+    if (!normalizedSearch) return true;
+    return [item.name, item.subType, item.primaryColor, item.pattern, ...item.styleTags, ...item.seasons]
+      .join(' ')
+      .toLocaleLowerCase(language === 'tr' ? 'tr-TR' : 'en-US')
+      .includes(normalizedSearch);
+  });
   const contentWidth = Math.min(Math.max(width - spacing.md * 2, 280), 1120);
   const columns = contentWidth >= 1000 ? 4 : contentWidth >= 680 ? 3 : 2;
   const cardWidth = (contentWidth - 12 * (columns - 1)) / columns;
@@ -56,7 +74,7 @@ export function HomeScreen(props: Props) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0]?.toLocaleUpperCase('tr-TR'))
+    .map((part) => part[0]?.toLocaleUpperCase(language === 'tr' ? 'tr-TR' : 'en-US'))
     .join('') || '';
 
   const signIn = async () => {
@@ -70,7 +88,7 @@ export function HomeScreen(props: Props) {
 
   const deleteFromMenu = (item: ClothingItem) => {
     void props.onDelete(item).catch((error: unknown) => {
-      Alert.alert('Silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Silinemedi', 'Could not delete'), error instanceof Error ? error.message : t('common.unknownError'));
     });
   };
 
@@ -78,11 +96,11 @@ export function HomeScreen(props: Props) {
     <View style={styles.headerContent}>
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.eyebrow}>KİŞİSEL GARDIROP</Text>
+          <Text style={styles.eyebrow}>{t('home.eyebrow')}</Text>
           <Text style={styles.title}>Outfit Combination</Text>
         </View>
         <Pressable
-          accessibilityLabel="Profil ve ayarlar"
+          accessibilityLabel={t('home.profile')}
           accessibilityRole="button"
           hitSlop={8}
           onPress={props.onSettings}
@@ -102,9 +120,9 @@ export function HomeScreen(props: Props) {
       </View>
 
       <View style={styles.actions}>
-        <Text style={styles.prompt}>Bu akşam ne giysem?</Text>
-        <PrimaryButton title="Kombin Öner" onPress={props.onRecommend} style={styles.actionButton} />
-        <SecondaryButton title="Kıyafet Ekle" onPress={() => props.onAdd()} style={styles.actionButton} />
+        <Text style={styles.prompt}>{t('home.prompt')}</Text>
+        <PrimaryButton title={t('home.recommend')} onPress={props.onRecommend} style={styles.actionButton} />
+        <SecondaryButton title={t('home.add')} onPress={() => props.onAdd()} style={styles.actionButton} />
       </View>
 
       {props.account.enabled ? (
@@ -115,14 +133,14 @@ export function HomeScreen(props: Props) {
             style={({ pressed }) => [styles.accountCard, pressed && styles.pressed]}
           >
             <View style={styles.accountCopy}>
-              <Text style={styles.accountEyebrow}>HESABIN</Text>
+              <Text style={styles.accountEyebrow}>{t('home.account')}</Text>
               <Text numberOfLines={1} style={styles.accountTitle}>
-                Merhaba, {props.account.user.displayName.split(/\s+/)[0] || props.account.user.displayName}
+                {t('home.hello', { name: props.account.user.displayName.split(/\s+/)[0] || props.account.user.displayName })}
               </Text>
               <Text style={styles.accountText}>
                 {analysisRemaining !== null && outfitRemaining !== null
-                  ? `Fotoğraf tanıma ${analysisRemaining} · Kombin önerisi ${outfitRemaining} hak`
-                  : 'Hesap ve kullanım ayrıntılarını görüntüle'}
+                  ? t('home.usage', { analysis: analysisRemaining, outfit: outfitRemaining })
+                  : t('home.accountDetails')}
               </Text>
             </View>
             <Text style={styles.accountChevron}>›</Text>
@@ -130,58 +148,68 @@ export function HomeScreen(props: Props) {
         ) : (
           <View style={styles.signInCard}>
             <View style={styles.accountCopy}>
-              <Text style={styles.accountEyebrow}>AKILLI ÖZELLİKLER</Text>
-              <Text style={styles.accountTitle}>Kullanım haklarını hesabında koru</Text>
-              <Text style={styles.accountText}>
-                Kıyafetlerini otomatik tanıtmak ve kişisel kombin önerileri almak için Google ile devam et.
-                Dolabın bu cihazda kalır.
-              </Text>
+              <Text style={styles.accountEyebrow}>{l('AKILLI ÖZELLİKLER', 'SMART FEATURES')}</Text>
+              <Text style={styles.accountTitle}>{t('home.guestBannerTitle')}</Text>
+              <Text style={styles.accountText}>{t('home.guestBannerText')}</Text>
             </View>
-            <PrimaryButton title="Google ile devam et" onPress={() => void signIn()} loading={accountBusy} />
+            <PrimaryButton title={t('home.signIn')} onPress={() => void signIn()} loading={accountBusy} />
           </View>
         )
       ) : null}
 
       {props.pendingDraft ? (
         <Pressable onPress={props.onResumeDraft} style={styles.draftCard}>
-          <Text style={styles.draftTitle}>Yarım kalan kıyafet</Text>
+          <Text style={styles.draftTitle}>{t('home.pending')}</Text>
           <Text style={styles.draftText}>
-            Fotoğrafın güvende{props.pendingQueueCount > 0 ? ` · Kuyrukta ${props.pendingQueueCount} fotoğraf daha var` : ''}. Devam et →
+            {props.pendingQueueCount > 0 ? t('home.pendingQueue', { count: props.pendingQueueCount }) : t('home.pendingText')}
           </Text>
         </Pressable>
       ) : null}
 
       <View style={[styles.readiness, readyForOutfits ? styles.readinessReady : styles.readinessMissing]}>
         <View style={styles.readinessCounts}>
-          <Text style={styles.readinessCount}>Üst {counts.top}</Text>
-          <Text style={styles.readinessCount}>Alt {counts.bottom}</Text>
-          <Text style={styles.readinessCount}>Ayakkabı {counts.shoes}</Text>
+          <Text style={styles.readinessCount}>{t('category.top')} {counts.top}</Text>
+          <Text style={styles.readinessCount}>{t('category.bottom')} {counts.bottom}</Text>
+          <Text style={styles.readinessCount}>{t('category.shoes')} {counts.shoes}</Text>
         </View>
         <Text style={styles.readinessText}>
-          {readyForOutfits ? '✓ Kombin oluşturmaya hazır' : 'Kombin için her kategoriden en az bir parça ekle.'}
+          {readyForOutfits ? t('home.ready') : t('home.missing')}
         </Text>
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Dolabım</Text>
+        <Text style={styles.sectionTitle}>{t('home.wardrobe')}</Text>
         <View style={styles.sectionMeta}>
           <Pressable onPress={props.onFavorites} hitSlop={8}>
-            <Text style={styles.favoriteLink}>Favoriler {props.favoriteCount}</Text>
+            <Text style={styles.favoriteLink}>{t('home.favorites', { count: props.favoriteCount })}</Text>
           </Pressable>
-          <Text style={styles.count}>{props.items.length} parça</Text>
+          <Pressable onPress={props.onHistory} hitSlop={8}>
+            <Text style={styles.favoriteLink}>{l('Geçmiş', 'History')}</Text>
+          </Pressable>
+          <Text style={styles.count}>{t('home.pieces', { count: props.items.length })}</Text>
         </View>
       </View>
 
       <View style={styles.filters}>
-        <Chip label="Tümü" selected={filter === 'all'} onPress={() => setFilter('all')} />
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder={l('Renk, tür veya tarz ara', 'Search color, type, or style')}
+          placeholderTextColor={colors.muted}
+          style={styles.searchInput}
+        />
+        <Chip label={t('common.all')} selected={filter === 'all'} onPress={() => setFilter('all')} />
         {(['top', 'bottom', 'shoes'] as Category[]).map((category) => (
           <Chip
             key={category}
-            label={CATEGORY_LABELS[category]}
+            label={t(`category.${category}` as 'category.top' | 'category.bottom' | 'category.shoes')}
             selected={filter === category}
             onPress={() => setFilter(category)}
           />
         ))}
+        <Chip label={l('Yeni eklenenler', 'Recently added')} selected={filter === 'recent'} onPress={() => setFilter('recent')} />
+        <Chip label={l('Yaz', 'Summer')} selected={filter === 'summer'} onPress={() => setFilter('summer')} />
+        <Chip label={l('Kış', 'Winter')} selected={filter === 'winter'} onPress={() => setFilter('winter')} />
       </View>
     </View>
   );
@@ -205,11 +233,11 @@ export function HomeScreen(props: Props) {
         ListEmptyComponent={props.items.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>◇</Text>
-            <Text style={styles.emptyTitle}>Dolabın henüz boş</Text>
-            <Text style={styles.emptyText}>İlk parçanı ekle; fotoğrafın telefonunun uygulama alanında saklanır.</Text>
-            <PrimaryButton title="İlk kıyafetimi ekle" onPress={() => props.onAdd()} />
+            <Text style={styles.emptyTitle}>{t('home.emptyTitle')}</Text>
+            <Text style={styles.emptyText}>{t('home.emptyText')}</Text>
+            <PrimaryButton title={t('home.firstItem')} onPress={() => props.onAdd()} />
           </View>
-        ) : <Notice>Bu filtrede henüz parça yok.</Notice>}
+        ) : <Notice>{t('home.filterEmpty')}</Notice>}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={[styles.listContent, { width: contentWidth }]}
         initialNumToRender={8}
@@ -288,6 +316,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   count: { color: colors.muted, fontSize: 13 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  searchInput: { width: '100%', minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surface, color: colors.text, fontSize: 15 },
   readiness: { borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   readinessReady: { backgroundColor: colors.primarySoft },
   readinessMissing: { backgroundColor: '#F4E5D4' },

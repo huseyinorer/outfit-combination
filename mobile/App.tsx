@@ -6,7 +6,6 @@ import {
   BackHandler,
   Platform,
   Pressable,
-  SafeAreaView,
   StatusBar as NativeStatusBar,
   StyleSheet,
   Text,
@@ -17,6 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UpdateGate } from './src/components/UpdateGate';
 import {
   clearAllUserData,
+  activateWardrobeOwner,
   deleteSetting,
   getPendingDraft,
   getPendingQueue,
@@ -26,6 +26,7 @@ import {
   listClothing,
   listFavoriteOutfits,
   listDeletedClothing,
+  moveAccountWardrobeToLocal,
   removeClothing,
   removeFavoriteOutfit,
   savePendingDraft,
@@ -50,16 +51,20 @@ import type {
 import { evaluateVersion, type MobileVersionInfo, type VersionDecision } from './src/domain/version';
 import { tactileSuccess } from './src/services/feedback';
 import { createThumbnail, deleteAllStoredImages, deleteStoredImage } from './src/services/imageStorage';
+import { clearInstallationAccess } from './src/services/installationAuth';
 import { fetchMobileVersion, getCurrentAppVersion } from './src/services/version';
 import {
   completeInitialAccountSignIn,
   deleteAccount,
   ensureAccountForAi,
   loadAccountState,
+  completeEmailSignIn,
+  requestEmailSignInCode,
   signInWithGoogle,
   signOutAccount,
   type AccountState,
 } from './src/services/accountAuth';
+import { LocalizationProvider, deviceLanguage, translate, type AppLanguage } from './src/locales';
 import { AddClothingScreen } from './src/screens/AddClothingScreen';
 import { EditClothingScreen } from './src/screens/EditClothingScreen';
 import { FavoritesScreen } from './src/screens/FavoritesScreen';
@@ -69,31 +74,42 @@ import { ResultsScreen } from './src/screens/ResultsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
+import { AuthScreen } from './src/screens/AuthScreen';
+import { HistoryScreen } from './src/screens/HistoryScreen';
 import { colors } from './src/theme/theme';
 
 type Screen =
+  | { name: 'auth'; returnTo?: 'home' | 'settings' }
   | { name: 'home' }
   | { name: 'add'; category?: Category; resume?: boolean }
   | { name: 'edit'; item: ClothingItem }
   | { name: 'recommend' }
   | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string }
   | { name: 'favorites' }
+  | { name: 'history' }
   | { name: 'settings' }
-  | { name: 'privacy' }
+  | { name: 'privacy'; returnTo?: 'auth' | 'settings'; authReturnTo?: 'home' | 'settings'; document?: 'privacy' | 'terms' }
   | { name: 'onboarding' };
 
 const bundledApiUrl = normalizeApiBaseUrl(String(Constants.expoConfig?.extra?.apiBaseUrl ?? ''));
 const internalToolsEnabled = Constants.expoConfig?.extra?.internalTools === true;
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>({ name: 'home' });
+  const [screen, setScreen] = useState<Screen>({ name: 'auth' });
   const [items, setItems] = useState<ClothingItem[]>([]);
   const [favorites, setFavorites] = useState<FavoriteOutfit[]>([]);
   const [pendingDraft, setPendingDraftState] = useState<ClothingDraft | null>(null);
   const [pendingQueue, setPendingQueueState] = useState<ClothingDraft[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<ClothingItem | null>(null);
   const [aiConsentGranted, setAiConsentGranted] = useState(false);
-  const [account, setAccount] = useState<AccountState>({ enabled: false, user: null, usage: null });
+  const [account, setAccount] = useState<AccountState>({
+    enabled: false,
+    googleEnabled: false,
+    emailEnabled: false,
+    user: null,
+    usage: null,
+  });
+  const [language, setLanguageState] = useState<AppLanguage>(deviceLanguage);
   const [apiUrl, setApiUrl] = useState(bundledApiUrl);
   const [ready, setReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -104,18 +120,52 @@ export default function App() {
   const deletedItemRef = useRef<ClothingItem | null>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versionCheckInFlightRef = useRef(false);
+  const t = (key: Parameters<typeof translate>[1], values?: Record<string, string | number>) => translate(language, key, values);
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  const changeLanguage = useCallback((nextLanguage: AppLanguage) => {
+    setLanguageState(nextLanguage);
+    void setSetting('language', nextLanguage);
+  }, []);
 
   const refresh = async () => setItems(await listClothing());
   const refreshFavorites = async () => setFavorites(await listFavoriteOutfits());
+  const reloadWardrobeState = async () => {
+    const [nextItems, nextFavorites, draft, queue] = await Promise.all([
+      listClothing(),
+      listFavoriteOutfits(),
+      getPendingDraft(),
+      getPendingQueue(),
+    ]);
+    setItems(nextItems);
+    setFavorites(nextFavorites);
+    setPendingDraftState(draft);
+    setPendingQueueState(queue);
+    return { items: nextItems, draft };
+  };
+
+  const activateAccountWardrobe = async (nextAccount: AccountState, claimLocal: boolean) => {
+    const activation = await activateWardrobeOwner(nextAccount.user?.id ?? null, claimLocal && Boolean(nextAccount.user));
+    const abandonedDeletes = await listDeletedClothing();
+    for (const item of abandonedDeletes) {
+      await removeClothing(item.id);
+      deleteStoredImage(item.photoUri);
+      deleteStoredImage(item.thumbnailUri);
+      deleteStoredImage(item.cutoutUri);
+    }
+    const state = await reloadWardrobeState();
+    setAccount(nextAccount);
+    return { ...state, claimedLocalWardrobe: activation.claimedLocalWardrobe };
+  };
   const refreshAccount = useCallback(async () => {
     if (!apiUrl) return;
     try {
-      const completed = await completeInitialAccountSignIn(apiUrl);
-      setAccount(completed ?? await loadAccountState(apiUrl));
+      const completed = await completeInitialAccountSignIn(apiUrl, language);
+      const nextAccount = completed ?? await loadAccountState(apiUrl, language);
+      await activateAccountWardrobe(nextAccount, Boolean(completed));
     } catch {
       setAccount((current) => current.user ? { ...current, stale: true } : current);
     }
-  }, [apiUrl]);
+  }, [apiUrl, language]);
 
   const goBack = useCallback(() => {
     if (screen.name === 'results') {
@@ -123,36 +173,30 @@ export default function App() {
       return;
     }
     if (screen.name === 'privacy') {
-      setScreen({ name: 'settings' });
+      setScreen(screen.returnTo === 'auth'
+        ? { name: 'auth', returnTo: screen.authReturnTo }
+        : { name: 'settings' });
       return;
     }
-    if (screen.name !== 'home') setScreen({ name: 'home' });
-  }, [screen.name]);
+    if (screen.name === 'auth' && screen.returnTo) {
+      setScreen(screen.returnTo === 'settings' ? { name: 'settings' } : { name: 'home' });
+      return;
+    }
+    if (screen.name !== 'home' && screen.name !== 'auth') setScreen({ name: 'home' });
+  }, [screen]);
 
   useEffect(() => {
     const start = async () => {
       try {
         await initializeDatabase();
-        const abandonedDeletes = await listDeletedClothing();
-        for (const item of abandonedDeletes) {
-          await removeClothing(item.id);
-          deleteStoredImage(item.photoUri);
-          deleteStoredImage(item.thumbnailUri);
-          deleteStoredImage(item.cutoutUri);
-        }
-        const [storedItems, storedFavorites, draft, queue, storedApi, storedConsent, onboarding] = await Promise.all([
-          listClothing(),
-          listFavoriteOutfits(),
-          getPendingDraft(),
-          getPendingQueue(),
+        const [storedApi, storedConsent, onboarding, authGate, storedLanguage] = await Promise.all([
           getSetting('api_url'),
           getSetting('ai_consent_version'),
           getSetting('onboarding_completed'),
+          getSetting('auth_gate_completed'),
+          getSetting('language'),
         ]);
-        setItems(storedItems);
-        setFavorites(storedFavorites);
-        setPendingDraftState(draft);
-        setPendingQueueState(queue);
+        if (storedLanguage === 'tr' || storedLanguage === 'en') setLanguageState(storedLanguage);
         setAiConsentGranted(storedConsent === AI_CONSENT_VERSION);
         const resolvedApiUrl = internalToolsEnabled
           ? normalizeApiBaseUrl(storedApi ?? bundledApiUrl)
@@ -163,9 +207,35 @@ export default function App() {
         } else if (!internalToolsEnabled && storedApi !== null) {
           await deleteSetting('api_url');
         }
-        if (onboarding !== 'true' && storedItems.length === 0 && !draft) setScreen({ name: 'onboarding' });
 
-        void Promise.all(storedItems.filter((item) => !item.thumbnailUri).map(async (item) => {
+        let nextAccount: AccountState = {
+          enabled: false,
+          googleEnabled: false,
+          emailEnabled: false,
+          user: null,
+          usage: null,
+        };
+        if (resolvedApiUrl) {
+          try {
+            nextAccount = await completeInitialAccountSignIn(resolvedApiUrl, storedLanguage === 'en' ? 'en' : 'tr')
+              ?? await loadAccountState(resolvedApiUrl, storedLanguage === 'en' ? 'en' : 'tr');
+          } catch {
+            // Hesap servisi kapalıyken misafir kullanım yolu açık kalır.
+          }
+        }
+        await activateAccountWardrobe(nextAccount, Boolean(nextAccount.user));
+
+        const wardrobeState = await reloadWardrobeState();
+        const canEnterApp = Boolean(nextAccount.user) || authGate === 'true';
+        if (!canEnterApp) {
+          setScreen({ name: 'auth' });
+        } else if (onboarding !== 'true' && wardrobeState.items.length === 0 && !wardrobeState.draft) {
+          setScreen({ name: 'onboarding' });
+        } else {
+          setScreen({ name: 'home' });
+        }
+
+        void Promise.all(wardrobeState.items.filter((item) => !item.thumbnailUri).map(async (item) => {
           try {
             const thumbnailUri = await createThumbnail(item.photoUri, item.id);
             await updateClothing({ ...item, thumbnailUri });
@@ -209,12 +279,8 @@ export default function App() {
   }, [checkVersion, ready]);
 
   useEffect(() => {
-    if (ready && apiUrl) void refreshAccount();
-  }, [apiUrl, ready, refreshAccount]);
-
-  useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (screen.name === 'home') return false;
+      if (screen.name === 'home' || (screen.name === 'auth' && !screen.returnTo)) return false;
       goBack();
       return true;
     });
@@ -238,13 +304,13 @@ export default function App() {
   const saveNewItem = async (item: ClothingItem) => {
     await insertClothing(item);
     await refresh();
-    tactileSuccess('Kıyafet dolabına eklendi.');
+    tactileSuccess(l('Kıyafet dolabına eklendi.', 'Clothing added to your wardrobe.'));
   };
 
   const saveEditedItem = async (item: ClothingItem) => {
     await updateClothing(item);
     await refresh();
-    tactileSuccess('Değişiklikler kaydedildi.');
+    tactileSuccess(l('Değişiklikler kaydedildi.', 'Changes saved.'));
     setScreen({ name: 'home' });
   };
 
@@ -257,6 +323,12 @@ export default function App() {
       deletedItemRef.current = null;
       setRecentlyDeleted(null);
     }
+  };
+
+  const flushPendingDelete = async () => {
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    deleteTimerRef.current = null;
+    if (deletedItemRef.current) await finalizeDeletedItem(deletedItemRef.current);
   };
 
   const deleteItem = async (item: ClothingItem) => {
@@ -281,7 +353,7 @@ export default function App() {
     deletedItemRef.current = null;
     setRecentlyDeleted(null);
     await Promise.all([refresh(), refreshFavorites()]);
-    tactileSuccess('Kıyafet geri getirildi.');
+    tactileSuccess(l('Kıyafet geri getirildi.', 'Clothing restored.'));
   };
 
   const toggleFavorite = async (suggestion: OutfitSuggestion) => {
@@ -290,14 +362,14 @@ export default function App() {
       const existing = favorites.find((favorite) => outfitKey(favorite) === key);
       if (existing) {
         await removeFavoriteOutfit(existing.id);
-        tactileSuccess('Kombin favorilerden çıkarıldı.');
+        tactileSuccess(l('Kombin favorilerden çıkarıldı.', 'Outfit removed from favorites.'));
       } else {
         await saveFavoriteOutfit(suggestion);
-        tactileSuccess('Kombin favorilere eklendi.');
+        tactileSuccess(l('Kombin favorilere eklendi.', 'Outfit added to favorites.'));
       }
       await refreshFavorites();
     } catch (error) {
-      Alert.alert('Favori güncellenemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Favori güncellenemedi', 'Could not update favorite'), error instanceof Error ? error.message : t('common.unknownError'));
     }
   };
 
@@ -323,7 +395,7 @@ export default function App() {
   const revokeAiConsent = async () => {
     await deleteSetting('ai_consent_version');
     setAiConsentGranted(false);
-    tactileSuccess('Akıllı özellik izni kapatıldı.');
+    tactileSuccess(l('Akıllı özellik izni kapatıldı.', 'Smart feature permission turned off.'));
   };
 
   const requestAiConsent = async (): Promise<boolean> => {
@@ -336,12 +408,12 @@ export default function App() {
         resolve(value);
       };
       Alert.alert(
-        'Akıllı özelliklere izin ver',
-        AI_DISCLOSURE,
+        l('Akıllı özelliklere izin ver', 'Allow smart features'),
+        language === 'tr' ? AI_DISCLOSURE : 'When you choose photo analysis, the reduced image is processed once to identify clothing attributes. Outfit requests contain only preferences and text attributes, never photos or file paths. Original wardrobe photos stay on your phone. You can withdraw this permission at any time.',
         [
-          { text: 'Yalnızca telefonda devam et', style: 'cancel', onPress: () => finish(false) },
+          { text: l('Yalnızca telefonda devam et', 'Continue only on this phone'), style: 'cancel', onPress: () => finish(false) },
           {
-            text: 'İzin ver',
+            text: l('İzin ver', 'Allow'),
             onPress: () => {
               finish(true);
               void grantAiConsent().catch(() => {
@@ -356,40 +428,85 @@ export default function App() {
   };
 
   const requestAiAccess = async (): Promise<boolean> => {
+    if (account.enabled && !account.user) {
+      setScreen({ name: 'auth', returnTo: 'home' });
+      return false;
+    }
     if (!await requestAiConsent()) return false;
     try {
-      const nextAccount = await ensureAccountForAi(apiUrl);
+      const nextAccount = await ensureAccountForAi(apiUrl, language);
       setAccount(nextAccount);
       return !nextAccount.enabled || Boolean(nextAccount.user);
     } catch (error) {
-      Alert.alert('Google ile giriş yapılamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(t('settings.signIn'), error instanceof Error ? error.message : t('common.unknownError'));
       return false;
     }
   };
 
-  const connectAccount = async () => {
-    try {
-      const nextAccount = await signInWithGoogle(apiUrl);
-      setAccount(nextAccount);
-      tactileSuccess('Google hesabın bağlandı.');
-    } catch (error) {
-      Alert.alert('Google ile giriş yapılamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
-    }
+  const finishAuthentication = async (nextAccount: AccountState) => {
+    await flushPendingDelete();
+    const owner = await activateAccountWardrobe(nextAccount, true);
+    await setSetting('auth_gate_completed', 'true');
+    tactileSuccess(t('auth.welcome', { name: nextAccount.user?.displayName.split(/\s+/)[0] || '' }));
+    if (owner.claimedLocalWardrobe) tactileSuccess(t('auth.localClaimed'));
+    const onboarding = await getSetting('onboarding_completed');
+    setScreen(onboarding === 'true' || owner.items.length > 0 || owner.draft
+      ? { name: 'home' }
+      : { name: 'onboarding' });
+  };
+
+  const authenticateWithGoogle = async () => {
+    await finishAuthentication(await signInWithGoogle(apiUrl, language));
+  };
+
+  const requestEmailCode = async (email: string) => {
+    await requestEmailSignInCode(apiUrl, email, language);
+  };
+
+  const authenticateWithEmail = async (email: string, code: string) => {
+    await finishAuthentication(await completeEmailSignIn(apiUrl, email, code, language));
+  };
+
+  const continueAsGuest = async () => {
+    await flushPendingDelete();
+    await signOutAccount();
+    const owner = await activateAccountWardrobe({ ...account, user: null, usage: null }, false);
+    await setSetting('auth_gate_completed', 'true');
+    const onboarding = await getSetting('onboarding_completed');
+    setScreen(onboarding === 'true' || owner.items.length > 0 || owner.draft
+      ? { name: 'home' }
+      : { name: 'onboarding' });
+  };
+
+  const retryAccountConfiguration = async () => {
+    if (!apiUrl) throw new Error(t('auth.unavailable'));
+    const nextAccount = await loadAccountState(apiUrl, language, true);
+    setAccount(nextAccount);
   };
 
   const disconnectAccount = async () => {
+    await flushPendingDelete();
     await signOutAccount();
-    setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
-    tactileSuccess('Bu cihazdaki hesap oturumu kapatıldı.');
+    const nextAccount = { ...account, user: null, usage: null };
+    await activateAccountWardrobe(nextAccount, false);
+    await deleteSetting('auth_gate_completed');
+    setScreen({ name: 'auth' });
+    tactileSuccess(l('Bu cihazdaki hesap oturumu kapatıldı.', 'Signed out on this device.'));
   };
 
   const removeAccount = async () => {
     try {
-      await deleteAccount(apiUrl);
-      setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
-      tactileSuccess('Hesap profilin sunucudan silindi.');
+      await flushPendingDelete();
+      const deletedUserId = account.user?.id;
+      await deleteAccount(apiUrl, language);
+      if (deletedUserId) await moveAccountWardrobeToLocal(deletedUserId);
+      const nextAccount = { ...account, user: null, usage: null };
+      await activateAccountWardrobe(nextAccount, false);
+      await deleteSetting('auth_gate_completed');
+      setScreen({ name: 'auth' });
+      tactileSuccess(l('Hesap profilin sunucudan silindi.', 'Your account profile was deleted from the service.'));
     } catch (error) {
-      Alert.alert('Hesap silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Hesap silinemedi', 'Could not delete account'), error instanceof Error ? error.message : t('common.unknownError'));
     }
   };
 
@@ -398,6 +515,7 @@ export default function App() {
     deleteTimerRef.current = null;
     deletedItemRef.current = null;
     setRecentlyDeleted(null);
+    await Promise.all([signOutAccount(), clearInstallationAccess()]);
     await clearAllUserData();
     let imageCleanupFailed = false;
     try { deleteAllStoredImages(); }
@@ -408,13 +526,14 @@ export default function App() {
     setPendingDraftState(null);
     setPendingQueueState([]);
     setAiConsentGranted(false);
-    setAccount((current) => ({ enabled: current.enabled, user: null, usage: null }));
+    await activateWardrobeOwner(null);
+    setAccount((current) => ({ ...current, user: null, usage: null }));
     setApiUrl(bundledApiUrl);
-    setScreen({ name: 'home' });
+    setScreen({ name: 'auth' });
     if (imageCleanupFailed) {
-      Alert.alert('Kayıtlar silindi', 'Dolap kayıtları silindi ancak bazı fotoğraf dosyaları temizlenemedi. Uygulamayı yeniden kurmak kalan dosyaları temizler.');
+      Alert.alert(l('Kayıtlar silindi', 'Records deleted'), l('Dolap kayıtları silindi ancak bazı fotoğraf dosyaları temizlenemedi. Uygulamayı yeniden kurmak kalan dosyaları temizler.', 'Wardrobe records were deleted, but some photo files could not be removed. Reinstalling the app removes the remaining files.'));
     } else {
-      tactileSuccess('Bu cihazdaki tüm uygulama verileri silindi.');
+      tactileSuccess(l('Bu cihazdaki tüm uygulama verileri silindi.', 'All app data on this device was deleted.'));
     }
   };
 
@@ -425,26 +544,45 @@ export default function App() {
 
   if (!ready) {
     return (
-      <View style={styles.center}>
-        <StatusBar style="dark" />
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loading}>Dolabın hazırlanıyor…</Text>
-      </View>
+      <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
+        <View style={styles.center}>
+          <StatusBar style="dark" />
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loading}>{t('startup.loading')}</Text>
+        </View>
+      </LocalizationProvider>
     );
   }
 
   if (startupError) {
     return (
-      <View style={styles.center}>
-        <StatusBar style="dark" />
-        <Text style={styles.errorTitle}>Uygulama açılamadı</Text>
-        <Text style={styles.errorText}>{startupError}</Text>
-      </View>
+      <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
+        <View style={styles.center}>
+          <StatusBar style="dark" />
+          <Text style={styles.errorTitle}>{t('startup.error')}</Text>
+          <Text style={styles.errorText}>{startupError}</Text>
+        </View>
+      </LocalizationProvider>
     );
   }
 
   let content: ReactNode;
   switch (screen.name) {
+    case 'auth':
+      content = (
+        <AuthScreen
+          account={account}
+          onGoogle={authenticateWithGoogle}
+          onRequestEmailCode={requestEmailCode}
+          onCompleteEmail={authenticateWithEmail}
+          onGuest={continueAsGuest}
+          onRetry={retryAccountConfiguration}
+          onBack={screen.returnTo ? goBack : undefined}
+          onPrivacy={() => setScreen({ name: 'privacy', returnTo: 'auth', authReturnTo: screen.returnTo, document: 'privacy' })}
+          onTerms={() => setScreen({ name: 'privacy', returnTo: 'auth', authReturnTo: screen.returnTo, document: 'terms' })}
+        />
+      );
+      break;
     case 'add':
       content = (
         <AddClothingScreen
@@ -520,6 +658,9 @@ export default function App() {
         />
       );
       break;
+    case 'history':
+      content = <HistoryScreen items={items} onBack={goBack} />;
+      break;
     case 'settings':
       content = (
         <SettingsScreen
@@ -529,20 +670,21 @@ export default function App() {
           internalToolsEnabled={internalToolsEnabled}
           account={account}
           onSaveApiUrl={saveApiUrl}
-          onSignIn={connectAccount}
+          onSignIn={async () => setScreen({ name: 'auth', returnTo: 'settings' })}
           onSignOut={disconnectAccount}
           onDeleteAccount={removeAccount}
           onRefreshAccount={refreshAccount}
           onGrantAiConsent={grantAiConsent}
           onRevokeAiConsent={revokeAiConsent}
           onDeleteAllData={deleteAllLocalData}
-          onPrivacy={() => setScreen({ name: 'privacy' })}
+          onPrivacy={() => setScreen({ name: 'privacy', returnTo: 'settings', document: 'privacy' })}
+          onTerms={() => setScreen({ name: 'privacy', returnTo: 'settings', document: 'terms' })}
           onBack={goBack}
         />
       );
       break;
     case 'privacy':
-      content = <PrivacyPolicyScreen onBack={goBack} />;
+      content = <PrivacyPolicyScreen document={screen.document ?? 'privacy'} onBack={goBack} />;
       break;
     case 'onboarding':
       content = <OnboardingScreen onStart={() => void completeOnboarding(true)} onSkip={() => void completeOnboarding(false)} />;
@@ -559,8 +701,9 @@ export default function App() {
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onSettings={() => setScreen({ name: 'settings' })}
-          onSignIn={connectAccount}
+          onSignIn={async () => setScreen({ name: 'auth', returnTo: 'home' })}
           onFavorites={() => setScreen({ name: 'favorites' })}
+          onHistory={() => setScreen({ name: 'history' })}
           favoriteCount={favorites.length}
           account={account}
         />
@@ -568,25 +711,29 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      {content}
-      {recentlyDeleted ? (
-        <View style={styles.undoBar}>
-          <Text numberOfLines={1} style={styles.undoText}>{recentlyDeleted.name || 'Kıyafet'} silindi.</Text>
-          <Pressable accessibilityRole="button" onPress={() => void undoDelete()} hitSlop={10}>
-            <Text style={styles.undoAction}>GERİ AL</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      <UpdateGate
-        currentVersion={currentVersion}
-        info={versionInfo}
-        decision={versionDecision}
-        dismissed={updateDismissed}
-        onDismiss={() => setUpdateDismissed(true)}
-      />
-    </SafeAreaView>
+    <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
+      <View style={styles.safeArea}>
+        <StatusBar style="dark" />
+        {content}
+        {recentlyDeleted ? (
+          <View style={styles.undoBar}>
+            <Text numberOfLines={1} style={styles.undoText}>
+              {t('feedback.deleted', { name: recentlyDeleted.name || t('common.clothing') })}
+            </Text>
+            <Pressable accessibilityRole="button" onPress={() => void undoDelete()} hitSlop={10}>
+              <Text style={styles.undoAction}>{t('feedback.undo')}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        <UpdateGate
+          currentVersion={currentVersion}
+          info={versionInfo}
+          decision={versionDecision}
+          dismissed={updateDismissed}
+          onDismiss={() => setUpdateDismissed(true)}
+        />
+      </View>
+    </LocalizationProvider>
   );
 }
 

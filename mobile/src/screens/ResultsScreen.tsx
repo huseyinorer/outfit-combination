@@ -24,6 +24,10 @@ import type {
   OutfitSuggestion,
 } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
+import { getOutfitFeedback, markOutfitWorn, setOutfitFeedback } from '../data/database';
+import type { OutfitFeedbackValue } from '../domain/types';
+import { useI18n } from '../locales';
+import { tactileSuccess } from '../services/feedback';
 
 interface Props {
   items: ClothingItem[];
@@ -36,11 +40,15 @@ interface Props {
 }
 
 export function ResultsScreen(props: Props) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
   const [displayed, setDisplayed] = useState(props.suggestions);
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewerItem, setViewerItem] = useState<ClothingItem | null>(null);
   const [seenKeys, setSeenKeys] = useState(() => new Set(props.suggestions.map(outfitKey)));
+  const [pinned, setPinned] = useState<Partial<Record<'topId' | 'bottomId' | 'shoeId', string>>>({});
+  const [feedback, setFeedback] = useState<Record<string, OutfitFeedbackValue | undefined>>({});
   const scrollX = useRef(new Animated.Value(0)).current;
   const listRef = useRef<FlatList<OutfitSuggestion>>(null);
   const favoriteKeys = useMemo(() => new Set(props.favorites.map(outfitKey)), [props.favorites]);
@@ -51,11 +59,23 @@ export function ResultsScreen(props: Props) {
     setActiveIndex(0);
   }, [props.suggestions]);
 
+  useEffect(() => {
+    let active = true;
+    void Promise.all(displayed.map(async (suggestion) => [outfitKey(suggestion), await getOutfitFeedback(suggestion)] as const))
+      .then((values) => {
+        if (!active) return;
+        setFeedback(Object.fromEntries(values.filter(([, value]) => value !== null)) as Record<string, OutfitFeedbackValue>);
+      });
+    return () => { active = false; };
+  }, [displayed]);
+
   const showAnotherSet = () => {
-    let next = buildLocalSuggestions(props.items, props.preferences, seenKeys).slice(0, 3);
+    const matchesPins = (suggestion: OutfitSuggestion) => Object.entries(pinned)
+      .every(([field, id]) => !id || suggestion[field as 'topId' | 'bottomId' | 'shoeId'] === id);
+    let next = buildLocalSuggestions(props.items, props.preferences, seenKeys).filter(matchesPins).slice(0, 3);
     let nextSeen = new Set(seenKeys);
     if (next.length === 0) {
-      next = buildLocalSuggestions(props.items, props.preferences).slice(0, 3);
+      next = buildLocalSuggestions(props.items, props.preferences).filter(matchesPins).slice(0, 3);
       nextSeen = new Set<string>();
     }
     if (next.length === 0) return;
@@ -65,6 +85,48 @@ export function ResultsScreen(props: Props) {
     setActiveIndex(0);
     scrollX.setValue(0);
     requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
+  };
+
+  const replacePiece = (
+    suggestion: OutfitSuggestion,
+    field: 'topId' | 'bottomId' | 'shoeId',
+    category: ClothingItem['category'],
+  ) => {
+    const candidates = props.items.filter((item) => item.category === category && item.id !== suggestion[field]);
+    const alternative = candidates.find((item) => !displayed.some((shown) => {
+      const changed = { ...suggestion, [field]: item.id };
+      return outfitKey(shown) === outfitKey(changed);
+    })) ?? candidates[0];
+    if (!alternative) {
+      tactileSuccess(t('result.noAlternative'));
+      return;
+    }
+    const next = {
+      ...suggestion,
+      [field]: alternative.id,
+      title: l('Kişisel seçimin', 'Your custom outfit'),
+      reason: l(`${alternative.name || alternative.subType || 'Yeni parça'} ile kombinini istediğin gibi güncelledin.`, `You updated the outfit with ${alternative.name || alternative.subType || 'a new item'}.`),
+      source: 'local' as const,
+    };
+    setDisplayed((current) => current.map((item) => item === suggestion ? next : item));
+    setPinned((current) => current[field] ? { ...current, [field]: alternative.id } : current);
+  };
+
+  const togglePin = (field: 'topId' | 'bottomId' | 'shoeId', id: string) => {
+    setPinned((current) => current[field] === id
+      ? { ...current, [field]: undefined }
+      : { ...current, [field]: id });
+  };
+
+  const saveFeedback = async (suggestion: OutfitSuggestion, value: OutfitFeedbackValue) => {
+    await setOutfitFeedback(suggestion, value);
+    setFeedback((current) => ({ ...current, [outfitKey(suggestion)]: value }));
+    tactileSuccess(value === 'like' ? t('result.like') : t('result.dislike'));
+  };
+
+  const saveWorn = async (suggestion: OutfitSuggestion) => {
+    await markOutfitWorn(suggestion);
+    tactileSuccess(t('result.wornSaved'));
   };
 
   const onMomentumScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -79,6 +141,27 @@ export function ResultsScreen(props: Props) {
     const scale = scrollX.interpolate({ inputRange, outputRange: [0.94, 1, 0.94], extrapolate: 'clamp' });
     const opacity = scrollX.interpolate({ inputRange, outputRange: [0.6, 1, 0.6], extrapolate: 'clamp' });
     const favorite = favoriteKeys.has(outfitKey(item));
+    const currentFeedback = feedback[outfitKey(item)];
+
+    const pieceRow = (
+      label: string,
+      clothing: ClothingItem,
+      field: 'topId' | 'bottomId' | 'shoeId',
+      category: ClothingItem['category'],
+    ) => {
+      const isPinned = pinned[field] === clothing.id;
+      return (
+        <View style={styles.pieceRow}>
+          <Text numberOfLines={1} style={styles.idText}>{label}</Text>
+          <Pressable onPress={() => togglePin(field, clothing.id)} style={[styles.smallAction, isPinned && styles.smallActionActive]}>
+            <Text style={[styles.smallActionText, isPinned && styles.smallActionTextActive]}>{isPinned ? '●' : '○'} {isPinned ? t('result.unlock') : t('result.lock')}</Text>
+          </Pressable>
+          <Pressable onPress={() => replacePiece(item, field, category)} style={styles.smallAction}>
+            <Text style={styles.smallActionText}>↻ {t('result.replace')}</Text>
+          </Pressable>
+        </View>
+      );
+    };
 
     return (
       <Animated.View style={[styles.page, { width, opacity, transform: [{ scale }] }]}>
@@ -92,7 +175,7 @@ export function ResultsScreen(props: Props) {
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={favorite ? 'Favoriden çıkar' : 'Favoriye ekle'}
+                accessibilityLabel={favorite ? t('result.favoriteRemove') : t('result.favoriteAdd')}
                 onPress={() => void props.onToggleFavorite(item)}
                 style={({ pressed }) => [styles.favoriteButton, favorite && styles.favoriteButtonActive, pressed && styles.pressed]}
               >
@@ -105,12 +188,29 @@ export function ResultsScreen(props: Props) {
               shoes={resolved.shoes}
               onPressItem={setViewerItem}
             />
-            <Text style={styles.photoHint}>Büyütmek için bir fotoğrafa dokun.</Text>
+            <Text style={styles.photoHint}>{t('result.enlarge')}</Text>
             <Text style={styles.reason}>{item.reason}</Text>
+            <View style={styles.feedbackRow}>
+              <Pressable
+                onPress={() => void saveFeedback(item, 'like')}
+                style={[styles.feedbackButton, currentFeedback === 'like' && styles.feedbackButtonActive]}
+              >
+                <Text style={styles.feedbackText}>👍 {t('result.like')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void saveFeedback(item, 'dislike')}
+                style={[styles.feedbackButton, currentFeedback === 'dislike' && styles.feedbackButtonActive]}
+              >
+                <Text style={styles.feedbackText}>👎 {t('result.dislike')}</Text>
+              </Pressable>
+              <Pressable onPress={() => void saveWorn(item)} style={styles.feedbackButton}>
+                <Text style={styles.feedbackText}>✓ {t('result.woreToday')}</Text>
+              </Pressable>
+            </View>
             <View style={styles.idBox}>
-              <Text style={styles.idText}>Üst · {resolved.top.name || resolved.top.id}</Text>
-              <Text style={styles.idText}>Alt · {resolved.bottom.name || resolved.bottom.id}</Text>
-              <Text style={styles.idText}>Ayakkabı · {resolved.shoes.name || resolved.shoes.id}</Text>
+              {pieceRow(t('result.top', { name: resolved.top.name || resolved.top.subType || t('category.top') }), resolved.top, 'topId', 'top')}
+              {pieceRow(t('result.bottom', { name: resolved.bottom.name || resolved.bottom.subType || t('category.bottom') }), resolved.bottom, 'bottomId', 'bottom')}
+              {pieceRow(t('result.shoes', { name: resolved.shoes.name || resolved.shoes.subType || t('category.shoes') }), resolved.shoes, 'shoeId', 'shoes')}
             </View>
             </View>
           </ContentFrame>
@@ -121,7 +221,7 @@ export function ResultsScreen(props: Props) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Kombinlerin" onBack={props.onBack} />
+      <ScreenHeader title={t('result.title')} onBack={props.onBack} />
       {props.warning ? (
         <ContentFrame maxWidth={820} style={styles.noticeWrap}><Notice>{props.warning}</Notice></ContentFrame>
       ) : null}
@@ -130,7 +230,7 @@ export function ResultsScreen(props: Props) {
           <Animated.FlatList
             ref={listRef}
             data={displayed}
-            extraData={props.favorites}
+            extraData={{ favorites: props.favorites, feedback, pinned }}
             keyExtractor={outfitKey}
             renderItem={renderItem}
             horizontal
@@ -146,14 +246,14 @@ export function ResultsScreen(props: Props) {
               <View key={outfitKey(suggestion)} style={[styles.dot, index === activeIndex && styles.dotActive]} />
             ))}
           </View>
-          <Text style={styles.swipe}>Diğer kombinler için sağa–sola kaydır</Text>
+          <Text style={styles.swipe}>{t('result.swipe')}</Text>
           <StickyFooter>
-            <SecondaryButton title="Başka 3 kombin" onPress={showAnotherSet} style={styles.footerButton} />
+            <SecondaryButton title={t('result.more')} onPress={showAnotherSet} style={styles.footerButton} />
           </StickyFooter>
         </>
       ) : (
         <ContentFrame maxWidth={720} style={styles.emptyWrap}>
-          <Notice tone="error">Bu dolaptan geçerli bir kombin oluşturulamadı.</Notice>
+          <Notice tone="error">{t('result.empty')}</Notice>
         </ContentFrame>
       )}
       <ImageViewerModal item={viewerItem} onClose={() => setViewerItem(null)} />
@@ -178,8 +278,17 @@ const styles = StyleSheet.create({
   favoriteIconActive: { color: colors.danger },
   photoHint: { color: colors.muted, fontSize: 11, textAlign: 'center', marginTop: -8 },
   reason: { color: colors.text, fontSize: 15, lineHeight: 23 },
-  idBox: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 3 },
-  idText: { color: colors.muted, fontSize: 12 },
+  feedbackRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  feedbackButton: { minHeight: 38, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: spacing.sm, backgroundColor: colors.background },
+  feedbackButtonActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  feedbackText: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  idBox: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.sm, gap: spacing.sm },
+  pieceRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
+  idText: { flex: 1, minWidth: 120, color: colors.muted, fontSize: 12 },
+  smallAction: { minHeight: 34, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingHorizontal: 9, backgroundColor: colors.surface },
+  smallActionActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  smallActionText: { color: colors.primary, fontSize: 10, fontWeight: '800' },
+  smallActionTextActive: { color: colors.text },
   pagination: { minHeight: 20, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.border },
   dotActive: { width: 20, backgroundColor: colors.primary },

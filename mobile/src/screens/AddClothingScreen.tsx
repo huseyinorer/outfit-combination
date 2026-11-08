@@ -16,19 +16,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
-import { getSetting, listCorrectionRules, recordAiCorrections, setSetting } from '../data/database';
+import { findClothingByPhotoHash, getSetting, listCorrectionRules, recordAiCorrections, setSetting } from '../data/database';
 import { applyLearnedCorrections } from '../domain/correctionLearning';
 import {
   CATEGORIES,
-  CATEGORY_LABELS,
   EMPTY_ATTRIBUTES,
   type Category,
   type ClothingDraft,
   type ClothingItem,
 } from '../domain/types';
 import { analyzeClothing } from '../services/api';
-import { createThumbnail, deleteStoredImage, finalizeImage, prepareSelectedImage } from '../services/imageStorage';
+import { createThumbnail, deleteStoredImage, finalizeImage, imageContentHash, prepareSelectedImage } from '../services/imageStorage';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 const guidance: Record<Category, string> = {
   top: 'Düz zemine ser, önden çek ve parçanın tamamını kadraja al.',
@@ -52,6 +52,14 @@ interface Props {
 }
 
 export function AddClothingScreen(props: Props) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  const categoryLabel = (value: Category) => t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes');
+  const localizedGuidance: Record<Category, string> = language === 'tr' ? guidance : {
+    top: 'Lay it flat, shoot from the front, and keep the whole item in frame.',
+    bottom: 'Show it from waist to hem; lay it flat and shoot from the front.',
+    shoes: 'Place the pair side by side so their shape and color are clear.',
+  };
   const { width } = useWindowDimensions();
   const [draft, setDraft] = useState<ClothingDraft | null>(props.initialDraft);
   const [queue, setQueue] = useState<ClothingDraft[]>(props.initialQueue);
@@ -83,10 +91,10 @@ export function AddClothingScreen(props: Props) {
   }, [analyzing]);
 
   const stepTitle = useMemo(() => {
-    if (!category) return 'Kategori seç';
-    if (!hasPhoto) return `${CATEGORY_LABELS[category]} fotoğrafı`;
-    return 'Kontrol et ve kaydet';
-  }, [category, hasPhoto]);
+    if (!category) return l('Kategori seç', 'Choose category');
+    if (!hasPhoto) return `${categoryLabel(category)} ${l('fotoğrafı', 'photo')}`;
+    return l('Kontrol et ve kaydet', 'Review and save');
+  }, [category, hasPhoto, language]);
 
   const persist = async (next: ClothingDraft) => {
     setDraft(next);
@@ -107,7 +115,7 @@ export function AddClothingScreen(props: Props) {
     const analyzingDraft: ClothingDraft = { ...current, analysisMode: 'ai', analysisError: null };
     try {
       await persist(analyzingDraft);
-      const result = await analyzeClothing(props.apiUrl, analyzingDraft.category, analyzingDraft.photoUri, controller.signal);
+      const result = await analyzeClothing(props.apiUrl, analyzingDraft.category, analyzingDraft.photoUri, language, controller.signal);
       const aiAttributes = {
         name: result.name ?? '',
         subType: result.subType ?? '',
@@ -136,7 +144,7 @@ export function AddClothingScreen(props: Props) {
       });
     } catch (error) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : 'Analiz servisine ulaşılamadı.';
+      const message = error instanceof Error ? error.message : l('Analiz servisine ulaşılamadı.', 'The analysis service is unavailable.');
       await persist({ ...analyzingDraft, analysisMode: 'ai', analysisError: message });
     } finally {
       if (analysisRequestRef.current === controller) analysisRequestRef.current = null;
@@ -157,10 +165,18 @@ export function AddClothingScreen(props: Props) {
     try {
       const id = draft?.id ?? Crypto.randomUUID();
       const photoUri = await prepareSelectedImage(uri, id);
+      const photoHash = imageContentHash(photoUri);
+      const duplicate = photoHash ? await findClothingByPhotoHash(photoHash) : null;
+      if (duplicate) {
+        deleteStoredImage(photoUri);
+        Alert.alert(l('Bu fotoğraf zaten dolabında', 'This photo is already in your wardrobe'), l(`${duplicate.name || 'Kıyafet'} kaydını açıp düzenleyebilirsin.`, `You can open and edit ${duplicate.name || 'the existing item'}.`));
+        return;
+      }
       const next: ClothingDraft = {
         id,
         category,
         photoUri,
+        photoHash,
         attributes: { ...EMPTY_ATTRIBUTES },
         categoryConflict: false,
         detectedCategory: null,
@@ -170,7 +186,7 @@ export function AddClothingScreen(props: Props) {
       setLearnedApplied(false);
       await persist(next);
     } catch (error) {
-      Alert.alert('Fotoğraf hazırlanamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Fotoğraf hazırlanamadı', 'Could not prepare photo'), error instanceof Error ? error.message : t('common.unknownError'));
     } finally {
       setBusy(false);
     }
@@ -179,7 +195,7 @@ export function AddClothingScreen(props: Props) {
   const pickFromLibrary = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Galeri izni gerekli', 'Fotoğraf seçebilmek için galeri izni vermelisin.');
+      Alert.alert(l('Galeri izni gerekli', 'Gallery permission required'), l('Fotoğraf seçebilmek için galeri izni vermelisin.', 'Allow gallery access to choose a photo.'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
@@ -194,7 +210,7 @@ export function AddClothingScreen(props: Props) {
     if (!category || hasPhoto) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Galeri izni gerekli', 'Birden fazla fotoğraf seçebilmek için galeri izni vermelisin.');
+      Alert.alert(l('Galeri izni gerekli', 'Gallery permission required'), l('Birden fazla fotoğraf seçebilmek için galeri izni vermelisin.', 'Allow gallery access to choose multiple photos.'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -210,10 +226,18 @@ export function AddClothingScreen(props: Props) {
     try {
       for (const asset of result.assets) {
         const id = Crypto.randomUUID();
+        const photoUri = await prepareSelectedImage(asset.uri, id);
+        const photoHash = imageContentHash(photoUri);
+        const duplicate = photoHash ? await findClothingByPhotoHash(photoHash) : null;
+        if (duplicate || prepared.some((draftItem) => draftItem.photoHash && draftItem.photoHash === photoHash)) {
+          deleteStoredImage(photoUri);
+          continue;
+        }
         prepared.push({
           id,
           category,
-          photoUri: await prepareSelectedImage(asset.uri, id),
+          photoUri,
+          photoHash,
           attributes: { ...EMPTY_ATTRIBUTES },
           aiAttributes: null,
           categoryConflict: false,
@@ -223,7 +247,10 @@ export function AddClothingScreen(props: Props) {
         });
       }
       const [first, ...remaining] = prepared;
-      if (!first) return;
+      if (!first) {
+        Alert.alert(l('Yeni fotoğraf bulunamadı', 'No new photos found'), l('Seçtiğin fotoğrafların tamamı zaten dolabında.', 'All selected photos are already in your wardrobe.'));
+        return;
+      }
       setLearnedApplied(false);
       setLastSource('gallery');
       await setSetting('last_photo_source', 'gallery');
@@ -232,7 +259,7 @@ export function AddClothingScreen(props: Props) {
       await persist(first);
     } catch (error) {
       prepared.forEach((item) => deleteStoredImage(item.photoUri));
-      Alert.alert('Toplu ekleme hazırlanamadı', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Toplu ekleme hazırlanamadı', 'Could not prepare bulk add'), error instanceof Error ? error.message : t('common.unknownError'));
     } finally {
       setBusy(false);
     }
@@ -241,7 +268,7 @@ export function AddClothingScreen(props: Props) {
   const takePhoto = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Kamera izni gerekli', 'Fotoğraf çekebilmek için kamera izni vermelisin.');
+      Alert.alert(l('Kamera izni gerekli', 'Camera permission required'), l('Fotoğraf çekebilmek için kamera izni vermelisin.', 'Allow camera access to take a photo.'));
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, cameraType: ImagePicker.CameraType.back });
@@ -259,11 +286,11 @@ export function AddClothingScreen(props: Props) {
       return;
     }
     Alert.alert(
-      'Fotoğrafı değiştir',
-      'Yeni fotoğraf başarıyla hazırlanana kadar mevcut taslak korunur. Devam edilsin mi?',
+      l('Fotoğrafı değiştir', 'Replace photo'),
+      l('Yeni fotoğraf başarıyla hazırlanana kadar mevcut taslak korunur. Devam edilsin mi?', 'The current draft stays safe until the new photo is ready. Continue?'),
       [
-        { text: 'Vazgeç', style: 'cancel' },
-        { text: 'Değiştir', onPress: () => void open() },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: l('Değiştir', 'Replace'), onPress: () => void open() },
       ],
     );
   };
@@ -291,6 +318,7 @@ export function AddClothingScreen(props: Props) {
         photoUri,
         thumbnailUri,
         cutoutUri: null,
+        photoHash: draft.photoHash ?? imageContentHash(photoUri),
         createdAt: now,
         updatedAt: now,
       });
@@ -312,7 +340,7 @@ export function AddClothingScreen(props: Props) {
         props.onComplete();
       }
     } catch (error) {
-      Alert.alert('Kaydedilemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+      Alert.alert(l('Kaydedilemedi', 'Could not save'), error instanceof Error ? error.message : t('common.unknownError'));
     } finally {
       savingRef.current = false;
       setBusy(false);
@@ -320,7 +348,7 @@ export function AddClothingScreen(props: Props) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScreenHeader title={stepTitle} onBack={props.onBack} />
       <ScrollView
         style={styles.scroll}
@@ -331,51 +359,51 @@ export function AddClothingScreen(props: Props) {
         <ContentFrame maxWidth={1080} style={styles.content}>
         {!category ? (
           <>
-            <Text style={styles.heading}>Ne ekliyorsun?</Text>
-            <Text style={styles.subheading}>Önce ana kategoriyi seç.</Text>
+            <Text style={styles.heading}>{l('Ne ekliyorsun?', 'What are you adding?')}</Text>
+            <Text style={styles.subheading}>{l('Önce ana kategoriyi seç.', 'Choose the main category first.')}</Text>
             <View style={styles.categoryList}>
               {CATEGORIES.map((value) => (
-                <PrimaryButton key={value} title={CATEGORY_LABELS[value]} onPress={() => setCategory(value)} />
+                <PrimaryButton key={value} title={categoryLabel(value)} onPress={() => setCategory(value)} />
               ))}
             </View>
           </>
         ) : !hasPhoto ? (
           <>
             <View style={styles.selectedCategory}>
-              <Text style={styles.selectedCategoryText}>{CATEGORY_LABELS[category]}</Text>
-              <Chip label="Değiştir" selected={false} onPress={() => setCategory(null)} />
+              <Text style={styles.selectedCategoryText}>{categoryLabel(category)}</Text>
+              <Chip label={l('Değiştir', 'Change')} selected={false} onPress={() => setCategory(null)} />
             </View>
             <View style={styles.guideCard}>
-              <Text style={styles.guideTitle}>Daha iyi sonuç için</Text>
-              <Text style={styles.guideText}>{guidance[category]}</Text>
+              <Text style={styles.guideTitle}>{l('Daha iyi sonuç için', 'For better results')}</Text>
+              <Text style={styles.guideText}>{localizedGuidance[category]}</Text>
             </View>
             <PrimaryButton
-              title={lastSource === 'camera' ? 'Kamerayla çek · Son kullanılan' : 'Galeriden seç · Son kullanılan'}
+              title={lastSource === 'camera' ? l('Kamerayla çek · Son kullanılan', 'Take photo · Last used') : l('Galeriden seç · Son kullanılan', 'Choose from gallery · Last used')}
               onPress={() => openSource(lastSource)}
               disabled={busy}
             />
             <SecondaryButton
-              title={lastSource === 'camera' ? 'Galeriden seç' : 'Kamerayla çek'}
+              title={lastSource === 'camera' ? l('Galeriden seç', 'Choose from gallery') : l('Kamerayla çek', 'Take photo')}
               onPress={() => openSource(lastSource === 'camera' ? 'gallery' : 'camera')}
               disabled={busy}
             />
             <SecondaryButton
-              title="Galeriden toplu ekle · En fazla 20"
+              title={l('Galeriden toplu ekle · En fazla 20', 'Bulk add from gallery · Up to 20')}
               onPress={() => void pickMultipleFromLibrary()}
               disabled={busy}
             />
-            {busy ? <View style={styles.busyRow}><ActivityIndicator color={colors.primary} /><Text style={styles.analysisText}>Fotoğraf hazırlanıyor…</Text></View> : null}
+            {busy ? <View style={styles.busyRow}><ActivityIndicator color={colors.primary} /><Text style={styles.analysisText}>{l('Fotoğraf hazırlanıyor…', 'Preparing photo…')}</Text></View> : null}
           </>
         ) : draft ? (
           <>
-            {batchRemaining > 1 ? <Notice>Toplu ekleme kuyruğu: bu parçayla birlikte {batchRemaining} fotoğraf kaldı.</Notice> : null}
+            {batchRemaining > 1 ? <Notice>{l(`Toplu ekleme kuyruğu: bu parçayla birlikte ${batchRemaining} fotoğraf kaldı.`, `Bulk queue: ${batchRemaining} photos remain including this item.`)}</Notice> : null}
             {analysisMode === 'undecided' ? (
               <Notice>
-                Fotoğrafın hazır. AI ile özellikleri otomatik çıkarabilir veya fotoğrafı göndermeden alanları ücretsiz olarak elle doldurabilirsin.
+                {l('Fotoğrafın hazır. Akıllı analizle özellikleri otomatik çıkarabilir veya fotoğrafı göndermeden alanları ücretsiz olarak elle doldurabilirsin.', 'Your photo is ready. Use smart analysis to fill attributes, or complete them manually for free without sending the photo.')}
               </Notice>
             ) : null}
             {analysisMode === 'undecided' && props.analysisRemaining === 0 ? (
-              <Notice tone="error">AI fotoğraf analizi hakkın doldu. Fotoğrafın güvende; elle doldurarak ücretsiz devam edebilirsin.</Notice>
+              <Notice tone="error">{l('Akıllı fotoğraf analizi hakkın doldu. Fotoğrafın güvende; elle doldurarak ücretsiz devam edebilirsin.', 'Your smart photo analysis credits are used up. Your photo is safe; continue manually for free.')}</Notice>
             ) : null}
             <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
               <View style={styles.mediaColumn}>
@@ -384,33 +412,33 @@ export function AddClothingScreen(props: Props) {
                   <View style={styles.analysisBox}>
                     <ActivityIndicator color={colors.primary} />
                     <View style={styles.analysisCopy}>
-                      <Text style={styles.analysisTitle}>Analiz sürüyor · {analysisElapsed} sn</Text>
-                      <Text style={styles.analysisText}>{analysisMessage}</Text>
+                      <Text style={styles.analysisTitle}>{l('Analiz sürüyor', 'Analysis in progress')} · {analysisElapsed} {l('sn', 'sec')}</Text>
+                      <Text style={styles.analysisText}>{language === 'tr' ? analysisMessage : analysisElapsed < 4 ? 'Uploading the photo securely…' : analysisElapsed < 18 ? 'Checking its colors and style…' : 'The free server may be waking up; your photo and draft are safe.'}</Text>
                     </View>
                   </View>
                 ) : null}
                 {draft.categoryConflict ? (
                   <Notice tone="error">
-                    Model bu parçayı {draft.detectedCategory ? CATEGORY_LABELS[draft.detectedCategory] : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.
+                    {l(`Model bu parçayı ${draft.detectedCategory ? categoryLabel(draft.detectedCategory) : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.`, `The model detected this as ${draft.detectedCategory ? categoryLabel(draft.detectedCategory) : 'a different category'}. Check your selected category.`)}
                   </Notice>
                 ) : null}
-                {learnedApplied ? <Notice>Önceki düzeltmelerine göre bazı AI alanları telefonda otomatik düzeltildi.</Notice> : null}
+                {learnedApplied ? <Notice>{l('Önceki düzeltmelerine göre bazı alanlar telefonda otomatik düzeltildi.', 'Some fields were corrected on your phone using your previous edits.')}</Notice> : null}
                 {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
                 {draft.analysisError ? (
-                  <SecondaryButton title="Yeniden dene" onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
+                  <SecondaryButton title={t('common.retry')} onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
                 ) : null}
               </View>
               <View style={styles.formColumn}>
                 {analysisMode === 'undecided' ? (
-                  <Notice>Devam etmek için aşağıdan AI analizini veya elle doldurmayı seç.</Notice>
+                  <Notice>{l('Devam etmek için aşağıdan akıllı analizi veya elle doldurmayı seç.', 'Choose smart analysis or manual entry below to continue.')}</Notice>
                 ) : !analyzing ? (
                   <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
                 ) : (
-                  <Notice>Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.</Notice>
+                  <Notice>{l('Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.', 'Fields will be editable when analysis finishes, or you can continue manually now.')}</Notice>
                 )}
               </View>
             </View>
-            <Text style={styles.storageNote}>Fotoğraf kalıcı uygulama alanına alındı. Kaydet düğmesine art arda basmak ikinci kayıt oluşturmaz.</Text>
+            <Text style={styles.storageNote}>{l('Fotoğraf kalıcı uygulama alanına alındı. Kaydet düğmesine art arda basmak ikinci kayıt oluşturmaz.', 'The photo is in persistent app storage. Tapping Save repeatedly will not create a duplicate record.')}</Text>
           </>
         ) : null}
         </ContentFrame>
@@ -419,9 +447,9 @@ export function AddClothingScreen(props: Props) {
         <StickyFooter>
           {analysisMode === 'undecided' ? (
             <>
-              <SecondaryButton title="Elle doldur · Ücretsiz" onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
+              <SecondaryButton title={l('Elle doldur · Ücretsiz', 'Enter manually · Free')} onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
               <PrimaryButton
-                title={`AI ile analiz et${props.analysisRemaining === undefined ? '' : ` · ${props.analysisRemaining} hak`}`}
+                title={`${l('Akıllı analiz', 'Smart analysis')}${props.analysisRemaining === undefined ? '' : ` · ${props.analysisRemaining} ${l('hak', 'credits')}`}`}
                 onPress={() => void runAnalysis(draft)}
                 loading={analyzing}
                 disabled={busy || props.analysisRemaining === 0}
@@ -429,12 +457,12 @@ export function AddClothingScreen(props: Props) {
               />
             </>
           ) : analyzing ? (
-            <SecondaryButton title="Beklemeden elle devam et" onPress={() => continueManually(draft)} style={styles.footerButton} />
+            <SecondaryButton title={l('Beklemeden elle devam et', 'Continue manually now')} onPress={() => continueManually(draft)} style={styles.footerButton} />
           ) : (
-            <SecondaryButton title="Fotoğrafı değiştir" onPress={() => openSource(lastSource)} disabled={busy} style={styles.footerButton} />
+            <SecondaryButton title={l('Fotoğrafı değiştir', 'Replace photo')} onPress={() => openSource(lastSource)} disabled={busy} style={styles.footerButton} />
           )}
           {analysisMode !== 'undecided' ? (
-            <PrimaryButton title="Kaydet" onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
+            <PrimaryButton title={t('common.save')} onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
           ) : null}
         </StickyFooter>
       ) : null}

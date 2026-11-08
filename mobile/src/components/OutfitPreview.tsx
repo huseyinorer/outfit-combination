@@ -1,6 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 interface Props {
   top: ClothingItem;
@@ -14,10 +15,11 @@ function BoardPiece({ item, large = false, onPress }: {
   large?: boolean;
   onPress?: (item: ClothingItem) => void;
 }) {
+  const { language } = useI18n();
   return (
     <Pressable
       accessibilityRole="imagebutton"
-      accessibilityLabel={`${item.name || item.subType} fotoğrafını büyüt`}
+      accessibilityLabel={language === 'tr' ? `${item.name || item.subType} fotoğrafını büyüt` : `Enlarge ${item.name || item.subType} photo`}
       onPress={() => onPress?.(item)}
       style={({ pressed }) => [styles.boardPiece, large && styles.boardPieceLarge, pressed && styles.pressed]}
     >

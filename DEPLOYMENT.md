@@ -1,6 +1,6 @@
 # GitHub, EAS ve Render yayın akışı
 
-Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API Google hesap oturumu, kullanıcı bazlı AI hakkı, OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Neon hesap profili ve kalıcı günlük/aylık AI kullanım sayaçları için kullanılır; kişisel dolabın sunucu veritabanına kopyalanmaz.
+Bu proje Android odaklı bir monorepo olarak hazırlanmıştır. Mobil dolap verisi ve fotoğraflar cihazda kalır; Render'daki API Google veya e-posta hesap oturumu, hesap ve kurulum bazlı AI hakkı, OpenAI analizi, AI kombin önerisi ve uygulama sürüm bilgisini sunar. Neon hesap profili, kimlik eşleştirmesi ve kalıcı günlük/aylık AI kullanım sayaçları için kullanılır; kişisel dolabın sunucu veritabanına kopyalanmaz.
 
 ## Otomatik akış
 
@@ -76,7 +76,7 @@ MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combinati
 
 `AppSecurity__TokenSigningKey` için parola kullanma; rastgele en az 32 bayt üret ve yalnız Render Secret olarak sakla. Üretim backend'i bu değer eksik veya kısa olduğunda bilinçli olarak açılmaz. Analiz ve kombin uçları yalnız sunucunun imzaladığı kurulum belirteçlerini kabul eder; mobil uygulama süresi dolan belirteci otomatik yeniler.
 
-`UsageQuota__ConnectionString` için Neon Dashboard'daki **Connect** ekranından PostgreSQL bağlantı bilgilerini al ve Render Secret olarak ekle. Backend ilk AI isteğinde `ai_usage_quota` tablosunu ve indeksini otomatik oluşturur. Günlük ve aylık analiz/kombin sayaçları atomik artırılır; 13 aydan eski dönemler temizlenir. Production ortamında Neon bağlantısı yoksa veya doğrulanamıyorsa maliyeti korumak için OpenAI isteği gönderilmez.
+`UsageQuota__ConnectionString` için Neon Dashboard'daki **Connect** ekranından PostgreSQL bağlantı bilgilerini al ve Render Secret olarak ekle. Backend ilk AI isteğinde `ai_usage_quota` tablosunu ve indeksini otomatik oluşturur. Her AI işleminde hem hesap UUID'si hem kurulum UUID'si atomik olarak kontrol edilir ve artırılır; bu iki sınırdan daha sıkı olanı uygulanır. Böylece aynı cihazda başka e-posta hesabına geçmek cihaz hakkını sıfırlamaz. 13 aydan eski dönemler temizlenir. Production ortamında Neon bağlantısı yoksa veya doğrulanamıyorsa maliyeti korumak için OpenAI isteği gönderilmez.
 
 ### Google hesabını etkinleştirme
 
@@ -103,9 +103,29 @@ AccountAuth__GoogleClientSecret=...
 AccountAuth__CallbackUrl=https://outfit-combination-api.onrender.com/api/account/google/callback
 ```
 
-Kaydedip deploy et. `GET /api/account/config` yanıtı `{"enabled":true}` olduğunda Ayarlar'da **Hesabım** kartı görünür ve AI işlemleri Google oturumu ister. Eski APK'ların AI çağrısını kaybetmemesi için hesap zorunluluğunu yalnız `v1.2.0` yayınlandıktan sonra aç; herkese dağıtımda ayrıca `MobileUpdate__MinimumVersion=1.2.0` yap.
+Kaydedip deploy et. `GET /api/account/config` yanıtında `googleEnabled` değeri `true` olduğunda Google giriş düğmesi görünür. Hesap sağlayıcılarından en az biri etkinse AI işlemleri oturum ister.
 
-İkinci Neon veritabanı gerekmez. İlk Google girişinde `account_principals`, `app_users`, `account_oauth_attempts` ve `account_exchange_codes` tabloları aynı bağlantıda otomatik oluşur. Hesap silindiğinde e-posta/ad/Google kimliği kaldırılır; kota silip yeniden hesap açarak suistimal edilmesin diye profilden ayrılmış kullanım kimliği ve sayaçları en fazla 13 ay korunur. Google client secret yalnız Render'da bulunur; Expo veya GitHub değişkenine yazılmaz.
+### Şifresiz e-posta girişini etkinleştirme
+
+Google'a ek olarak veya Google olmadan e-posta doğrulama kodu kullanabilirsin. Render **Environment** alanına şunları ekle:
+
+```text
+EmailAuth__ApiKey=EMAIL_SAGLAYICI_API_ANAHTARI
+EmailAuth__FromAddress=login@DOGRULANMIS-ALAN-ADIN
+EmailAuth__FromName=Outfit Combination
+```
+
+Varsayılan `EmailAuth__Endpoint=https://api.resend.com/emails` Resend uyumlu istek gövdesi kullanır. Gönderen alan adı e-posta sağlayıcısında doğrulanmış olmalıdır. Bu iki zorunlu secret eksikse e-posta giriş düğmesi son kullanıcıya hiç gösterilmez. Kod altı hanelidir, 10 dakika geçerlidir, yeniden gönderme bekleme süresi ve en fazla beş deneme sunucuda uygulanır. Kodun kendisi veritabanına açık metin olarak yazılmaz.
+
+Deploy sonrasında aşağıdaki yanıt iki sağlayıcının durumunu ayrı ayrı gösterir:
+
+```json
+{"enabled":true,"googleEnabled":true,"emailEnabled":true}
+```
+
+Production API en az bir hesap sağlayıcısı olmadan başlamaz. Bu davranış, yanlışlıkla silinen OAuth/e-posta ayarlarının AI uçlarını hesap kontrolü olmadan açmasını engeller. Google zaten etkinse e-posta ayarlarını boş bırakabilirsin; e-posta etkinse Google ayarlarını boş bırakabilirsin.
+
+İkinci Neon veritabanı gerekmez. İlk hesap girişinde `account_principals`, `app_users`, `account_identity_links`, geçici OAuth/e-posta kod tabloları ve kota tablosu aynı bağlantıda otomatik oluşur. Google `sub` veya doğrulanmış e-posta, değişebilir profil alanlarından ayrı bir kimlik bağlantısı olarak tutulur; uygulama içinde hesap için kararlı bir UUID kullanılır. Hesap profili silindiğinde e-posta/ad/profil URL'si kaldırılır; kota silip yeniden hesap açarak suistimal edilmesin diye takma adlı kimlik eşleştirmesi ve sayaçlar en fazla 13 ay korunabilir. Google client secret ve e-posta API anahtarı yalnız Render'da bulunur; Expo veya GitHub değişkenine yazılmaz.
 
 `render.yaml`, Frankfurt bölgesinde ücretsiz `free` web service planını seçer. Ödeme bilgisi gerekmez; ancak servis 15 dakika boşta kalınca kapanır ve ilk istek yaklaşık bir dakika bekleyebilir. Mobil analiz ve kombin istekleri bu soğuk başlangıca izin vermek için 90 saniye zaman aşımı kullanır. İlk istek yine de kesilirse fotoğraf taslağı kaybolmaz; yeniden denendiğinde uyanmış servis yanıt verir.
 
@@ -125,7 +145,7 @@ https://SERVIS-ADIN.onrender.com/api/version
 
 İlk başarılı sürüm iş akışından sonra GitHub deposunda **Releases > en yeni sürüm > outfit-combination.apk** dosyasını indir. APK'yı BlueStacks penceresine sürükleyip bırakabilir veya sağdaki **Install APK** düğmesinden seçebilirsin.
 
-`v1.3.0` ve sonraki dahili APK'lar yeni sürümü uygulamanın içinde indirir, ilerlemeyi gösterir ve indirme bitince Android kurulum ekranını açar. Android ilk kullanımda **Bu kaynaktan uygulama yüklemeye izin ver** ayarını ve her güncellemede açık kurulum onayını ister; uygulama güvenlik nedeniyle sessiz kurulum veya otomatik onay yapamaz. `v1.2.0 → v1.3.0` geçişinde eski sürüm bu özelliği henüz içermediği için tarayıcıyla son bir kez güncelleme gerekir.
+`v1.3.0` ve sonraki dahili APK'lar yeni sürümü uygulamanın içinde indirir, ilerlemeyi gösterir ve indirme bitince Android kurulum ekranını açar. Android ilk kullanımda **Bu kaynaktan uygulama yüklemeye izin ver** ayarını ve her güncellemede açık kurulum onayını ister; uygulama güvenlik nedeniyle sessiz kurulum veya otomatik onay yapamaz. `v1.3.2` ile hesap ve kurulum erişim belirteçleri Android Keystore anahtarıyla şifrelenmiş uygulama depolamasına taşınır; ilk açılışta eski yerel belirteçler otomatik geçirilir. Bu yerel Android modülü nedeniyle `v1.3.2` bir OTA değil, yeni APK olarak kurulmalıdır.
 
 Normal güncellemeler **Daha sonra** ile ertelenebilir; güvenlik veya uyumluluk nedeniyle Render'daki `MobileUpdate__MinimumVersion` yükseltilirse eski sürüm zorunlu güncellenir. APK mevcut uygulamanın üzerine kurulduğu sürece SQLite dolabı ve fotoğraflar korunur. Uygulamayı önce kaldırırsan Android uygulama verisini de siler. Google Play için üretilen `production` profili `REQUEST_INSTALL_PACKAGES` iznini bilinçli olarak içermez; mağaza dağıtımında güncellemeler Play üzerinden yapılmalıdır.
 
@@ -137,10 +157,13 @@ Depo ayarlarında **Settings > Pages > Build and deployment > Source** alanını
 https://huseyinorer.github.io/outfit-combination/
 https://huseyinorer.github.io/outfit-combination/privacy.html
 https://huseyinorer.github.io/outfit-combination/terms.html
+https://huseyinorer.github.io/outfit-combination/tr/
+https://huseyinorer.github.io/outfit-combination/tr/privacy.html
+https://huseyinorer.github.io/outfit-combination/tr/terms.html
 ```
 
 Play Console gizlilik politikası alanına `privacy.html` adresini yaz. Uygulamanın Ayarlar ekranı da aynı adrese gider. Mağaza başvurusundan önce geliştirici unvanını ve iletişim yöntemini `privacy-site/privacy.html`, uygulama içi politika ve Play Console ile birebir eşleştir. Data Safety cevap taslağı `docs/PLAY_DATA_SAFETY_TR.md` dosyasındadır.
 
 ## 6. Neon ne zaman gerekir?
 
-Neon hesap profili ile kalıcı AI kullanım kotası için kullanılır. Dolap kayıtları ve fotoğraflar hâlâ telefondadır; Render veya Neon'a kişisel dolap kopyası yazılmaz. Çoklu cihaz senkronizasyonu veya bulut yedekleme daha sonra eklenirse metadata Neon'da, fotoğraflar ise obje depolama servisinde tutulmalıdır.
+Neon hesap profili, doğrulanmış kimlik bağlantıları ve kalıcı AI kullanım kotası için kullanılır. Dolap kayıtları ve fotoğraflar hâlâ telefondadır; Render veya Neon'a kişisel dolap kopyası yazılmaz. Aynı telefonda her hesabın SQLite kayıtları ayrı tutulur; hesap değiştirmek diğer hesabın dolabını silmez. İlk hesap, mevcut misafir dolabını bir kez sahiplenebilir. Çoklu cihaz senkronizasyonu veya bulut yedekleme daha sonra eklenirse metadata Neon'da, fotoğraflar ise obje depolama servisinde tutulmalıdır.

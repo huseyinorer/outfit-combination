@@ -4,7 +4,6 @@ import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { completeSuggestions, getMissingCategories } from '../domain/outfitEngine';
 import {
-  CATEGORY_LABELS,
   type Category,
   type ClothingItem,
   type OutfitPreferences,
@@ -12,24 +11,8 @@ import {
 } from '../domain/types';
 import { requestOutfits } from '../services/api';
 import { colors, radius, spacing } from '../theme/theme';
-
-const questions = [
-  {
-    key: 'destination' as const,
-    title: 'Nereye gidiyorsun?',
-    options: ['Fark etmez', 'Günlük', 'İş/ofis', 'Arkadaş buluşması', 'Akşam yemeği', 'Özel gün'],
-  },
-  {
-    key: 'look' as const,
-    title: 'Nasıl görünmek istiyorsun?',
-    options: ['Fark etmez', 'Spor', 'Rahat', 'Smart casual', 'Klasik'],
-  },
-  {
-    key: 'tone' as const,
-    title: 'Hangi tonları tercih edersin?',
-    options: ['Fark etmez', 'Açık', 'Koyu', 'Karışık'],
-  },
-];
+import { useI18n } from '../locales';
+import { listDislikedOutfitKeys } from '../data/database';
 
 interface Props {
   items: ClothingItem[];
@@ -47,11 +30,24 @@ interface Props {
 }
 
 export function RecommendScreen(props: Props) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  const categoryLabel = (value: Category) => t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes');
+  const any = l('Fark etmez', 'Any');
+  const questions = language === 'tr' ? [
+    { key: 'destination' as const, title: 'Nereye gidiyorsun?', options: ['Fark etmez', 'Günlük', 'İş/ofis', 'Arkadaş buluşması', 'Akşam yemeği', 'Özel gün'] },
+    { key: 'look' as const, title: 'Nasıl görünmek istiyorsun?', options: ['Fark etmez', 'Spor', 'Rahat', 'Smart casual', 'Klasik'] },
+    { key: 'tone' as const, title: 'Hangi tonları tercih edersin?', options: ['Fark etmez', 'Açık', 'Koyu', 'Karışık'] },
+  ] : [
+    { key: 'destination' as const, title: 'Where are you going?', options: ['Any', 'Daily', 'Work/office', 'Meeting friends', 'Dinner', 'Special occasion'] },
+    { key: 'look' as const, title: 'How do you want to look?', options: ['Any', 'Sporty', 'Relaxed', 'Smart casual', 'Classic'] },
+    { key: 'tone' as const, title: 'Which tones do you prefer?', options: ['Any', 'Light', 'Dark', 'Mixed'] },
+  ];
   const { width } = useWindowDimensions();
   const [preferences, setPreferences] = useState<OutfitPreferences>({
-    destination: 'Fark etmez',
-    look: 'Fark etmez',
-    tone: 'Fark etmez',
+    destination: any,
+    look: any,
+    tone: any,
   });
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -65,12 +61,13 @@ export function RecommendScreen(props: Props) {
     return () => clearInterval(timer);
   }, [busy]);
 
-  const submitLocal = () => {
+  const submitLocal = async () => {
     if (busy || missing.length > 0) return;
     setError(null);
+    const excluded = await listDislikedOutfitKeys();
     props.onResults(
-      completeSuggestions(props.items, preferences),
-      'Kombinler fotoğraf ve özelliklerin cihazından gönderilmeden yerel kurallarla hazırlandı.',
+      completeSuggestions(props.items, preferences, [], excluded),
+      l('Kombinler fotoğraf ve özelliklerin cihazından gönderilmeden yerel kurallarla hazırlandı.', 'Outfits were created with local rules without sending photos or attributes off your device.'),
       preferences,
     );
   };
@@ -82,24 +79,24 @@ export function RecommendScreen(props: Props) {
     setError(null);
     try {
       if (!await props.onRequestAiAccess()) {
-        setError('AI kullanılmadı. İstersen ücretsiz yerel öneriyi seçebilirsin.');
+        setError(l('Akıllı öneri kullanılmadı. Ücretsiz yerel öneriyi seçebilirsin.', 'Smart suggestions were not used. You can choose the free local option.'));
         return;
       }
       try {
-        const response = await requestOutfits(props.apiUrl, preferences, props.items);
-        const checked = completeSuggestions(props.items, preferences, response.suggestions);
+        const response = await requestOutfits(props.apiUrl, preferences, props.items, language);
+        const checked = completeSuggestions(props.items, preferences, response.suggestions, await listDislikedOutfitKeys());
         const mobileCompleted = checked.some((x) => x.source === 'local');
         props.onResults(
           checked,
-          response.warning ?? (response.usedFallback || mobileCompleted ? 'Bazı öneriler yerel kurallarla tamamlandı.' : undefined),
+          response.warning ?? (response.usedFallback || mobileCompleted ? l('Bazı öneriler yerel kurallarla tamamlandı.', 'Some suggestions were completed with local rules.') : undefined),
           preferences,
         );
       } catch (apiError) {
-        const local = completeSuggestions(props.items, preferences);
-        const message = apiError instanceof Error ? apiError.message : 'API bağlantısı kurulamadı.';
+        const local = completeSuggestions(props.items, preferences, [], await listDislikedOutfitKeys());
+        const message = apiError instanceof Error ? apiError.message : l('Bağlantı kurulamadı.', 'Could not connect.');
         props.onResults(
           local,
-          `AI servisine ulaşılamadı (${message}). Yerel öneriler gösteriliyor.`,
+          l(`Akıllı öneri servisine ulaşılamadı (${message}). Yerel öneriler gösteriliyor.`, `The smart suggestion service is unavailable (${message}). Showing local suggestions.`),
           preferences,
         );
       }
@@ -111,22 +108,22 @@ export function RecommendScreen(props: Props) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Kombin Öner" onBack={props.onBack} />
+      <ScreenHeader title={t('home.recommend')} onBack={props.onBack} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <ContentFrame maxWidth={1120} style={styles.content}>
           {missing.length > 0 ? (
             <View style={styles.missingCard}>
-              <Text style={styles.missingTitle}>Önce dolabını tamamlayalım</Text>
+              <Text style={styles.missingTitle}>{l('Önce dolabını tamamlayalım', 'Complete your wardrobe first')}</Text>
               <Text style={styles.missingText}>
-                Kombin için {missing.map((x) => CATEGORY_LABELS[x]).join(', ')} kategorisinden en az bir parça gerekli. Bu durumda AI çağrısı yapılmaz.
+                {l(`Kombin için ${missing.map(categoryLabel).join(', ')} kategorisinden en az bir parça gerekli. Bu durumda akıllı öneri isteği gönderilmez.`, `Add at least one item in ${missing.map(categoryLabel).join(', ')}. No smart request is sent while a category is missing.`)}
               </Text>
               {missing.map((category) => (
-                <SecondaryButton key={category} title={`${CATEGORY_LABELS[category]} ekle`} onPress={() => props.onAddCategory(category)} />
+                <SecondaryButton key={category} title={`${categoryLabel(category)} ${l('ekle', 'add')}`} onPress={() => props.onAddCategory(category)} />
               ))}
             </View>
           ) : (
             <>
-              <Text style={styles.lead}>Üç kısa seçim yap; dolabındaki gerçek parçalardan seçenekler hazırlayalım.</Text>
+              <Text style={styles.lead}>{l('Üç kısa seçim yap; dolabındaki gerçek parçalardan seçenekler hazırlayalım.', 'Make three quick choices and we will use real items from your wardrobe.')}</Text>
               <View style={[styles.questions, wide && styles.questionsWide]}>
                 {questions.map((question, index) => (
                   <View key={question.key} style={styles.question}>
@@ -148,24 +145,24 @@ export function RecommendScreen(props: Props) {
               {busy ? (
                 <Notice>
                   {elapsed < 5
-                    ? `Seçimlerin hazırlanıyor · ${elapsed} sn`
-                    : `AI yanıtı bekleniyor · ${elapsed} sn. Ulaşılamazsa yerel kombinler otomatik gösterilecek.`}
+                    ? l(`Seçimlerin hazırlanıyor · ${elapsed} sn`, `Preparing your choices · ${elapsed} sec`)
+                    : l(`Akıllı öneri bekleniyor · ${elapsed} sn. Ulaşılamazsa yerel kombinler otomatik gösterilecek.`, `Waiting for smart suggestions · ${elapsed} sec. Local outfits will appear automatically if unavailable.`)}
                 </Notice>
               ) : null}
               {error ? <Notice tone="error">{error}</Notice> : null}
               {props.outfitRemaining === 0 ? (
-                <Notice tone="error">AI kombin hakkın doldu. Yerel öneri ücretsiz olarak kullanılabilir.</Notice>
+                <Notice tone="error">{l('Akıllı kombin hakkın doldu. Yerel öneri ücretsiz olarak kullanılabilir.', 'Your smart outfit credits are used up. Local suggestions remain free.')}</Notice>
               ) : null}
-              <Text style={styles.privacy}>Bu istekte sunucuya yalnızca seçimlerin, kıyafet ID’leri ve yazılı özellikler gider; fotoğraf ve dosya yolu gönderilmez.</Text>
+              <Text style={styles.privacy}>{l('Bu istekte sunucuya yalnızca seçimlerin, kıyafet ID’leri ve yazılı özellikler gider; fotoğraf ve dosya yolu gönderilmez.', 'Only your choices, clothing IDs, and text attributes are sent; photos and file paths are never included.')}</Text>
             </>
           )}
         </ContentFrame>
       </ScrollView>
       {missing.length === 0 ? (
         <StickyFooter>
-          <SecondaryButton title="Yerel öner · Ücretsiz" onPress={submitLocal} disabled={busy} style={styles.footerButton} />
+          <SecondaryButton title={l('Yerel öner · Ücretsiz', 'Local suggestions · Free')} onPress={() => void submitLocal()} disabled={busy} style={styles.footerButton} />
           <PrimaryButton
-            title={`AI ile öner${props.outfitRemaining === undefined ? '' : ` · ${props.outfitRemaining} hak`}`}
+            title={`${l('Akıllı öner', 'Smart suggestions')}${props.outfitRemaining === undefined ? '' : ` · ${props.outfitRemaining} ${l('hak', 'credits')}`}`}
             onPress={() => void submitAi()}
             loading={busy}
             disabled={props.outfitRemaining === 0}

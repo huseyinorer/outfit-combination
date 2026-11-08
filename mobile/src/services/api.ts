@@ -11,6 +11,7 @@ import type {
   OutfitSuggestion,
 } from '../domain/types';
 import { accountAuthenticatedFetch } from './accountAuth';
+import type { AppLanguage } from '../locales';
 
 interface AnalyzeResponse extends ClothingAttributes {
   categoryConflict: boolean;
@@ -20,19 +21,30 @@ interface AnalyzeResponse extends ClothingAttributes {
 const cleanBaseUrl = normalizeApiBaseUrl;
 const allowHttpApi = String(Constants.expoConfig?.extra?.appEnvironment ?? 'development') === 'development';
 
-function checkedBaseUrl(value: string): string {
+function checkedBaseUrl(value: string, language: AppLanguage = 'tr'): string {
   const cleanUrl = cleanBaseUrl(value);
-  if (!cleanUrl) throw new Error('API adresi ayarlanmamış.');
-  if (!allowHttpApi && !isSecureApiBaseUrl(cleanUrl)) throw new Error('Bu uygulama sürümü backend için HTTPS adresi gerektiriyor.');
+  if (!cleanUrl) throw new Error(language === 'tr' ? 'Sunucu adresi ayarlanmamış.' : 'The service address is not configured.');
+  if (!allowHttpApi && !isSecureApiBaseUrl(cleanUrl)) throw new Error(language === 'tr' ? 'Bu sürüm güvenli bir HTTPS sunucu adresi gerektiriyor.' : 'This build requires a secure HTTPS service address.');
   return cleanUrl;
 }
 
-async function readError(response: Response): Promise<string> {
+async function readError(response: Response, language: AppLanguage): Promise<string> {
   try {
-    const body = (await response.json()) as { message?: string; error?: string };
+    const body = (await response.json()) as { code?: string; message?: string; error?: string };
+    if (language === 'en') {
+      const messages: Record<string, string> = {
+        account_session_required: 'Sign in to use smart features.',
+        ai_quota_exceeded: 'Your smart feature credits are used up. Local features remain available.',
+        quota_service_unavailable: 'Usage credits cannot be verified, so no paid request was sent.',
+        missing_category: 'Add at least one item in every main category.',
+      };
+      const localized = body.code ? messages[body.code] : undefined;
+      if (localized) return localized;
+      return body.error ?? `Service error (${response.status})`;
+    }
     return body.message ?? body.error ?? `API hatası (${response.status})`;
   } catch {
-    return `API hatası (${response.status})`;
+    return language === 'tr' ? `API hatası (${response.status})` : `Service error (${response.status})`;
   }
 }
 
@@ -63,13 +75,15 @@ export async function analyzeClothing(
   baseUrl: string,
   category: Category,
   photoUri: string,
+  language: AppLanguage,
   externalSignal?: AbortSignal,
 ): Promise<AnalyzeResponse> {
-  checkedBaseUrl(baseUrl);
+  checkedBaseUrl(baseUrl, language);
   const form = new FormData();
   form.append('category', category);
+  form.append('language', language);
   const photo = new File(photoUri);
-  if (!photo.exists) throw new Error('Analiz edilecek fotoğraf bulunamadı.');
+  if (!photo.exists) throw new Error(language === 'tr' ? 'Analiz edilecek fotoğraf bulunamadı.' : 'The photo to analyze could not be found.');
   form.append('photo', photo);
 
   const controller = new AbortController();
@@ -81,12 +95,12 @@ export async function analyzeClothing(
     const response = await accountAuthenticatedFetch(baseUrl, '/api/analyze', {
       method: 'POST',
       body: form,
-    }, controller.signal);
-    if (!response.ok) throw new Error(await readError(response));
+    }, controller.signal, language);
+    if (!response.ok) throw new Error(await readError(response, language));
     return (await response.json()) as AnalyzeResponse;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Analiz zaman aşımına uğradı. Fotoğraf güvende; yeniden deneyebilirsin.');
+      throw new Error(language === 'tr' ? 'Analiz zaman aşımına uğradı. Fotoğraf güvende; yeniden deneyebilirsin.' : 'Analysis timed out. Your photo is safe; try again.');
     }
     throw error;
   } finally {
@@ -112,8 +126,9 @@ export async function requestOutfits(
   baseUrl: string,
   preferences: OutfitPreferences,
   wardrobe: ClothingItem[],
+  language: AppLanguage,
 ): Promise<OutfitResult> {
-  checkedBaseUrl(baseUrl);
+  checkedBaseUrl(baseUrl, language);
   const controller = new AbortController();
   // Allow the first request to include a possible Render Free cold start.
   const timeout = setTimeout(() => controller.abort(), 90_000);
@@ -122,9 +137,9 @@ export async function requestOutfits(
     const response = await accountAuthenticatedFetch(baseUrl, '/api/outfits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preferences, wardrobe: wardrobe.map(toApiItem) }),
-    }, controller.signal);
-    if (!response.ok) throw new Error(await readError(response));
+      body: JSON.stringify({ language, preferences, wardrobe: wardrobe.map(toApiItem) }),
+    }, controller.signal, language);
+    if (!response.ok) throw new Error(await readError(response, language));
     const body = (await response.json()) as {
       suggestions: OutfitSuggestion[];
       usedFallback?: boolean;
@@ -137,7 +152,7 @@ export async function requestOutfits(
     };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Kombin isteği zaman aşımına uğradı.');
+      throw new Error(language === 'tr' ? 'Kombin isteği zaman aşımına uğradı.' : 'The outfit request timed out.');
     }
     throw error;
   } finally {

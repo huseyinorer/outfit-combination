@@ -24,6 +24,7 @@ export interface ClothingItem extends ClothingAttributes {
   photoUri: string;
   thumbnailUri: string | null;
   cutoutUri: string | null;
+  photoHash?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +33,7 @@ export interface ClothingDraft {
   id: string;
   category: Category;
   photoUri: string;
+  photoHash?: string | null;
   attributes: ClothingAttributes;
   aiAttributes?: ClothingAttributes | null;
   categoryConflict: boolean;
@@ -64,6 +66,13 @@ export interface OutfitResult {
   suggestions: OutfitSuggestion[];
   usedFallback: boolean;
   warning?: string;
+}
+
+export type OutfitFeedbackValue = 'like' | 'dislike';
+
+export interface WornOutfit extends OutfitSuggestion {
+  id: string;
+  wornAt: string;
 }
 
 export interface CorrectionRule {

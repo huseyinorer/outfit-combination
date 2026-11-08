@@ -1,6 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { CATEGORY_LABELS, type ClothingItem } from '../domain/types';
+import { type ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 export function ClothingCard({ item, onPress, onMenu, width }: {
   item: ClothingItem;
@@ -8,17 +9,20 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
   onMenu: () => void;
   width: number;
 }) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  const categoryLabel = t(`category.${item.category}` as 'category.top' | 'category.bottom' | 'category.shoes');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.name || CATEGORY_LABELS[item.category]} kaydını aç`}
+      accessibilityLabel={l(`${item.name || categoryLabel} kaydını aç`, `Open ${item.name || categoryLabel}`)}
       onPress={onPress}
       style={({ pressed }) => [styles.card, { width }, pressed && styles.pressed]}
     >
       <Image source={{ uri: item.thumbnailUri ?? item.photoUri }} style={styles.image} resizeMode="cover" />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.name || 'Kıyafet'} seçenekleri`}
+        accessibilityLabel={l(`${item.name || 'Kıyafet'} seçenekleri`, `${item.name || 'Clothing'} options`)}
         hitSlop={8}
         onPress={onMenu}
         style={styles.menu}
@@ -26,9 +30,9 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
         <Text style={styles.menuText}>•••</Text>
       </Pressable>
       <View style={styles.body}>
-        <Text numberOfLines={1} style={styles.name}>{item.name || 'Adsız parça'}</Text>
+        <Text numberOfLines={1} style={styles.name}>{item.name || l('Adsız parça', 'Unnamed item')}</Text>
         <Text numberOfLines={1} style={styles.meta}>
-          {[item.primaryColor, item.subType].filter(Boolean).join(' · ') || CATEGORY_LABELS[item.category]}
+          {[item.primaryColor, item.subType].filter(Boolean).join(' · ') || categoryLabel}
         </Text>
       </View>
     </Pressable>

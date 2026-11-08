@@ -7,6 +7,7 @@ import { Notice, ScreenHeader, SecondaryButton } from '../components/ui';
 import { resolveOutfitItems } from '../domain/outfitEngine';
 import type { ClothingItem, FavoriteOutfit } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: {
   items: ClothingItem[];
@@ -14,17 +15,19 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
   onToggleFavorite: (favorite: FavoriteOutfit) => Promise<void>;
   onBack: () => void;
 }) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
   const [viewerItem, setViewerItem] = useState<ClothingItem | null>(null);
   const wide = width >= 900;
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Favori kombinler" onBack={onBack} />
+      <ScreenHeader title={l('Favori kombinler', 'Favorite outfits')} onBack={onBack} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <ContentFrame maxWidth={1120} style={styles.content}>
           {favorites.length === 0 ? (
-            <Notice>Henüz favori kombin yok. Sonuç ekranındaki kalp simgesine dokunarak ekleyebilirsin.</Notice>
+            <Notice>{l('Henüz favori kombin yok. Sonuç ekranındaki kalp simgesine dokunarak ekleyebilirsin.', 'You have no favorite outfits yet. Tap the heart on a result card to add one.')}</Notice>
           ) : (
             <View style={styles.grid}>
               {favorites.map((favorite) => {
@@ -40,7 +43,7 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
                       onPressItem={setViewerItem}
                     />
                     <Text style={styles.reason}>{favorite.reason}</Text>
-                    <SecondaryButton title="Favoriden çıkar" onPress={() => void onToggleFavorite(favorite)} />
+                    <SecondaryButton title={t('result.favoriteRemove')} onPress={() => void onToggleFavorite(favorite)} />
                   </View>
                 );
               })}

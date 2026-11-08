@@ -45,6 +45,7 @@ public sealed class WardrobeItem
 
 public sealed class OutfitRequest
 {
+    public string Language { get; set; } = "tr";
     public OutfitPreferences Preferences { get; set; } = new();
     public List<WardrobeItem> Wardrobe { get; set; } = [];
 }
@@ -71,4 +72,8 @@ public sealed record OutfitResponse(
 public sealed record InstallationRegistration(string InstallationId, string? AppVersion);
 
 public sealed record AccountExchangeRequest(string Code);
+
+public sealed record EmailSignInStartRequest(string Email, string? Language);
+
+public sealed record EmailSignInCompleteRequest(string Email, string Code);
 

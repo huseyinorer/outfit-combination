@@ -117,3 +117,15 @@ test('başka kombin isteği daha önce görülen üçlüleri dışlar', () => {
   assert.equal(first.some((seen) => next.some((candidate) => outfitKey(seen) === outfitKey(candidate))), false);
 });
 
+test('beğenilmeyen üçlü alternatif varken yerel öneriden çıkarılır', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('t2', 'top'),
+    item('b1', 'bottom'), item('b2', 'bottom'),
+    item('s1', 'shoes'), item('s2', 'shoes'),
+  ];
+  const disliked = new Set(['t1|b1|s1']);
+  const suggestions = completeSuggestions(wardrobe, preferences, [], disliked);
+  assert.equal(suggestions.some((suggestion) => outfitKey(suggestion) === 't1|b1|s1'), false);
+  assert.equal(suggestions.length, 3);
+});
+

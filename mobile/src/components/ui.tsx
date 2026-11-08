@@ -10,6 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 interface ButtonProps {
   title: string;
@@ -120,10 +121,11 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
 }
 
 export function ScreenHeader({ title, onBack, action }: { title: string; onBack: () => void; action?: ReactNode }) {
+  const { t } = useI18n();
   return (
     <View style={styles.header}>
       <Pressable accessibilityRole="button" onPress={onBack} hitSlop={12} style={styles.backButton}>
-        <Text style={styles.backText}>‹ Geri</Text>
+        <Text style={styles.backText}>{t('common.back')}</Text>
       </Pressable>
       <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>
       <View style={styles.headerAction}>{action}</View>

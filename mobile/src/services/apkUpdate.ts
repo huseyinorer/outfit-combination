@@ -6,6 +6,7 @@ import {
   openInstaller,
   openUnknownAppsSettings,
 } from '../../modules/outfit-update-installer/src';
+import type { AppLanguage } from '../locales';
 
 export interface ApkDownloadProgress {
   bytesWritten: number;
@@ -25,10 +26,12 @@ export async function downloadApk(
   url: string,
   version: string,
   onProgress: (progress: ApkDownloadProgress) => void,
+  language: AppLanguage = 'tr',
 ): Promise<string> {
-  if (Platform.OS !== 'android') throw new Error('Doğrudan güncelleme yalnızca Android için kullanılabilir.');
-  if (!url.toLowerCase().startsWith('https://')) throw new Error('Güncelleme bağlantısı güvenli değil.');
-  if (!FileSystem.cacheDirectory) throw new Error('Güncelleme için geçici depolama alanı açılamadı.');
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  if (Platform.OS !== 'android') throw new Error(l('Doğrudan güncelleme yalnızca Android için kullanılabilir.', 'Direct updates are available only on Android.'));
+  if (!url.toLowerCase().startsWith('https://')) throw new Error(l('Güncelleme bağlantısı güvenli değil.', 'The update link is not secure.'));
+  if (!FileSystem.cacheDirectory) throw new Error(l('Güncelleme için geçici depolama alanı açılamadı.', 'Temporary update storage could not be opened.'));
 
   const destination = `${FileSystem.cacheDirectory}outfit-combination-${safeVersion(version)}.apk`;
   await FileSystem.deleteAsync(destination, { idempotent: true });
@@ -51,7 +54,7 @@ export async function downloadApk(
 
   const result = await download.downloadAsync();
   if (!result || result.status < 200 || result.status >= 300) {
-    throw new Error('Güncelleme dosyası indirilemedi. Bağlantını kontrol edip yeniden dene.');
+    throw new Error(l('Güncelleme dosyası indirilemedi. Bağlantını kontrol edip yeniden dene.', 'The update could not be downloaded. Check your connection and try again.'));
   }
 
   return FileSystem.getContentUriAsync(result.uri);

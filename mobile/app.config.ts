@@ -40,8 +40,8 @@ const config: ExpoConfig = {
     [
       'expo-image-picker',
       {
-        photosPermission: 'Kıyafet fotoğraflarını dolabına eklemek için galeri erişimi gerekir.',
-        cameraPermission: 'Kıyafet fotoğrafı çekmek için kamera erişimi gerekir.',
+        photosPermission: 'Kıyafet eklemek için galeri erişimi gerekir. / Photo library access is required to add clothing.',
+        cameraPermission: 'Kıyafet fotoğrafı çekmek için kamera erişimi gerekir. / Camera access is required to photograph clothing.',
         microphonePermission: false,
       },
     ],

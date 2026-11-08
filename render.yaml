@@ -19,6 +19,18 @@ services:
         sync: false
       - key: UsageQuota__ConnectionString
         sync: false
+      - key: AccountAuth__GoogleClientId
+        sync: false
+      - key: AccountAuth__GoogleClientSecret
+        sync: false
+      - key: AccountAuth__CallbackUrl
+        sync: false
+      - key: EmailAuth__ApiKey
+        sync: false
+      - key: EmailAuth__FromAddress
+        sync: false
+      - key: EmailAuth__FromName
+        value: Outfit Combination
       - key: MobileUpdate__MinimumVersion
         value: 1.0.0
       - key: MobileUpdate__ForceLatest

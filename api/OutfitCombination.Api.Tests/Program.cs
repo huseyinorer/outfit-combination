@@ -25,8 +25,11 @@ public static class TestRunner
             ("Kurulum ve kullanıcı belirteci ayrımı", TokenTypeSeparation),
             ("Eksiksiz hesap yapılandırması", CompleteAccountConfiguration),
             ("Yarım hesap yapılandırması reddi", PartialAccountConfiguration),
+            ("E-posta giriş yapılandırması", EmailAccountConfiguration),
+            ("E-posta normalleştirme", EmailNormalization),
             ("Google OAuth isteğinde state korunur", GoogleAuthorizationUrl),
             ("Başarısız AI isteği kullanım hakkını iade eder", QuotaRefund),
+            ("Hesap ve cihaz kotası birlikte uygulanır", DualSubjectQuota),
             ("Görsel imza doğrulama", ImageSignatureValidation),
             ("Büyük kombin girdisi reddi", OversizedOutfitInput),
             ("Mobil sürüm dosyası", MobileVersionFile)
@@ -87,7 +90,7 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.3.1", new MobileVersionService().LatestVersion);
+        Equal("1.3.2", new MobileVersionService().LatestVersion);
     }
 
     private static void ShortClothingName()
@@ -173,6 +176,26 @@ public static class TestRunner
         Equal(true, options.PartiallyConfigured);
     }
 
+    private static void EmailAccountConfiguration()
+    {
+        var options = new EmailAuthOptions
+        {
+            ApiKey = "test-key",
+            FromAddress = "login@example.com"
+        };
+        Equal(true, options.Enabled);
+        Equal(false, options.PartiallyConfigured);
+        options.FromAddress = string.Empty;
+        Equal(false, options.Enabled);
+        Equal(true, options.PartiallyConfigured);
+    }
+
+    private static void EmailNormalization()
+    {
+        Equal("person@example.com", AccountStore.NormalizeEmail(" Person@Example.COM "));
+        Equal<string?>(null, AccountStore.NormalizeEmail("not-an-email"));
+    }
+
     private static void GoogleAuthorizationUrl()
     {
         var service = new GoogleOAuthService(
@@ -206,6 +229,31 @@ public static class TestRunner
         Equal(QuotaStatus.Exceeded, service.TryConsumeAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
         service.RefundAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult();
         Equal(QuotaStatus.Allowed, service.TryConsumeAsync(subject, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        service.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void DualSubjectQuota()
+    {
+        var service = new PersistentUsageQuotaService(
+            Options.Create(new UsageQuotaOptions
+            {
+                DailyAnalysisLimit = 2,
+                MonthlyAnalysisLimit = 2,
+                DailyOutfitLimit = 2,
+                MonthlyOutfitLimit = 2
+            }),
+            new TestHostEnvironment(),
+            NullLogger<PersistentUsageQuotaService>.Instance);
+        var installation = Guid.NewGuid().ToString();
+        var firstAccount = Guid.NewGuid().ToString();
+        var secondAccount = Guid.NewGuid().ToString();
+
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(firstAccount, installation, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(secondAccount, installation, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+        Equal(QuotaStatus.Exceeded, service.TryConsumeAsync(Guid.NewGuid().ToString(), installation, AiOperation.Analysis, CancellationToken.None).GetAwaiter().GetResult().Status);
+
+        var effective = service.GetSnapshotAsync(secondAccount, installation, CancellationToken.None).GetAwaiter().GetResult();
+        Equal(2, effective?.DailyAnalysisUsed ?? -1);
         service.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 

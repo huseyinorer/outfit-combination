@@ -16,6 +16,7 @@ import { isSecureApiBaseUrl, isValidApiBaseUrl, normalizeApiBaseUrl } from '../d
 import { AI_DISCLOSURE } from '../domain/privacy';
 import { getApiHealth } from '../services/api';
 import type { AccountState } from '../services/accountAuth';
+import { useI18n } from '../locales';
 import { colors, radius, spacing } from '../theme/theme';
 
 type ConnectionState = 'idle' | 'checking' | 'online' | 'degraded' | 'offline' | 'invalid';
@@ -35,10 +36,13 @@ interface Props {
   onRevokeAiConsent: () => Promise<void>;
   onDeleteAllData: () => Promise<void>;
   onPrivacy: () => void;
+  onTerms: () => void;
   onBack: () => void;
 }
 
 export function SettingsScreen(props: Props) {
+  const { language, setLanguage, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const [url, setUrl] = useState(normalizeApiBaseUrl(props.apiUrl));
   const [busy, setBusy] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
@@ -50,8 +54,8 @@ export function SettingsScreen(props: Props) {
   const validUrl = isValidApiBaseUrl(url) && (allowHttpApi || isSecureApiBaseUrl(url));
 
   useEffect(() => {
-    if (props.account.enabled) void props.onRefreshAccount();
-  }, [props.account.enabled, props.onRefreshAccount]);
+    void props.onRefreshAccount();
+  }, [props.onRefreshAccount]);
 
   const testConnection = async () => {
     if (!validUrl) {
@@ -115,12 +119,15 @@ export function SettingsScreen(props: Props) {
 
   const confirmDeleteAccount = () => {
     Alert.alert(
-      'Hesabı kalıcı olarak sil',
-      'Google bağlantın ve hesap profilin silinecek. Telefonundaki dolabın ve fotoğrafların etkilenmez. Kullanım sınırlarının kötüye kullanılmasını önlemek için kimliğinle ilişkilendirilmeyen kullanım kayıtları en fazla 13 ay saklanabilir.',
+      l('Hesabı kalıcı olarak sil', 'Permanently delete account'),
+      l(
+        'Hesap profilin silinecek. Bu telefondaki dolabın ve fotoğrafların etkilenmez. Kötüye kullanımı önleyen anonim kullanım kayıtları en fazla 13 ay saklanabilir.',
+        'Your account profile will be deleted. The wardrobe and photos on this phone will not be affected. Anonymous usage records may be retained for up to 13 months to prevent abuse.',
+      ),
       [
-        { text: 'Vazgeç', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Hesabı sil',
+          text: t('settings.deleteAccount'),
           style: 'destructive',
           onPress: async () => {
             setAccountBusy(true);
@@ -137,27 +144,30 @@ export function SettingsScreen(props: Props) {
 
   const confirmDeleteAll = () => {
     Alert.alert(
-      'Tüm yerel verileri sil',
-      'Kıyafetler, fotoğraflar, favoriler, taslaklar ve ayarlar bu cihazdan kalıcı olarak silinecek.',
+      l('Tüm yerel verileri sil', 'Delete all local data'),
+      l(
+        'Kıyafetler, fotoğraflar, favoriler, taslaklar ve ayarlar bu cihazdan kalıcı olarak silinecek.',
+        'Clothing, photos, favorites, drafts, and settings will be permanently deleted from this device.',
+      ),
       [
-        { text: 'Vazgeç', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Devam et',
+          text: l('Devam et', 'Continue'),
           style: 'destructive',
           onPress: () => Alert.alert(
-            'Son onay',
-            'Bu işlem geri alınamaz. Tüm Outfit Combination verileri silinsin mi?',
+            l('Son onay', 'Final confirmation'),
+            l('Bu işlem geri alınamaz. Tüm Outfit Combination verileri silinsin mi?', 'This cannot be undone. Delete all Outfit Combination data?'),
             [
-              { text: 'Vazgeç', style: 'cancel' },
+              { text: t('common.cancel'), style: 'cancel' },
               {
-                text: 'Her şeyi sil',
+                text: l('Her şeyi sil', 'Delete everything'),
                 style: 'destructive',
                 onPress: async () => {
                   setPrivacyBusy(true);
                   try {
                     await props.onDeleteAllData();
                   } catch (error) {
-                    Alert.alert('Veriler silinemedi', error instanceof Error ? error.message : 'Bilinmeyen hata');
+                    Alert.alert(l('Veriler silinemedi', 'Could not delete data'), error instanceof Error ? error.message : t('common.unknownError'));
                     setPrivacyBusy(false);
                   }
                 },
@@ -170,20 +180,20 @@ export function SettingsScreen(props: Props) {
   };
 
   const connectionText = connection === 'checking'
-    ? 'Sunucu kontrol ediliyor; ücretsiz Render servisi uyanıyor olabilir…'
+    ? l('Sunucu kontrol ediliyor; ücretsiz servis uyanıyor olabilir…', 'Checking the service; the free server may be waking up…')
     : connection === 'online'
-      ? 'Sunucu bağlı ve kalıcı kullanım sayacı etkin.'
+      ? l('Sunucu bağlı ve kalıcı kullanım sayacı etkin.', 'Service connected and persistent usage counting is active.')
       : connection === 'degraded'
-        ? 'Sunucu bağlı; kalıcı kullanım sayacı yapılandırılmamış.'
+        ? l('Sunucu bağlı; kalıcı kullanım sayacı yapılandırılmamış.', 'Service connected; persistent usage counting is not configured.')
         : connection === 'offline'
-          ? 'Sunucu 90 saniye içinde yanıt vermedi.'
+          ? l('Sunucu 90 saniye içinde yanıt vermedi.', 'The service did not respond within 90 seconds.')
           : connection === 'invalid'
-            ? 'API adresi geçersiz.'
-            : 'Bağlantı henüz kontrol edilmedi.';
+            ? l('API adresi geçersiz.', 'The API address is invalid.')
+            : l('Bağlantı henüz kontrol edilmedi.', 'The connection has not been checked yet.');
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScreenHeader title="Ayarlar" onBack={props.onBack} />
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScreenHeader title={t('settings.title')} onBack={props.onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -192,35 +202,42 @@ export function SettingsScreen(props: Props) {
       >
         <ContentFrame maxWidth={760} style={styles.content}>
           <View style={styles.card}>
+            <Text style={styles.title}>{t('settings.language')}</Text>
+            <View style={styles.languageRow}>
+              <SecondaryButton title={t('settings.turkish')} onPress={() => setLanguage('tr')} style={styles.languageButton} />
+              <SecondaryButton title={t('settings.english')} onPress={() => setLanguage('en')} style={styles.languageButton} />
+            </View>
+          </View>
+          <View style={styles.card}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>Akıllı özellikler</Text>
+              <Text style={styles.title}>{l('Akıllı özellikler', 'Smart features')}</Text>
               <View style={[styles.statusBadge, props.aiConsentGranted && styles.statusBadgeActive]}>
                 <Text style={[styles.statusText, props.aiConsentGranted && styles.statusTextActive]}>
-                  {props.aiConsentGranted ? 'İzin açık' : 'İzin kapalı'}
+                  {props.aiConsentGranted ? l('İzin açık', 'Allowed') : l('İzin kapalı', 'Not allowed')}
                 </Text>
               </View>
             </View>
-            <Text style={styles.text}>{AI_DISCLOSURE}</Text>
+            <Text style={styles.text}>{language === 'tr' ? AI_DISCLOSURE : 'When you choose photo analysis, the selected image is sent securely for one-time recognition. Outfit requests include only clothing IDs and text attributes, never photos or file paths.'}</Text>
             <Notice>
-              Bu izin kapalıyken kıyafetlerini elle kaydedebilir ve kombinlerini telefonunda ücretsiz hazırlayabilirsin.
+              {l('Bu izin kapalıyken kıyafetlerini elle kaydedebilir ve kombinlerini telefonunda ücretsiz hazırlayabilirsin.', 'When this permission is off, you can still save clothing manually and create local outfits for free.')}
             </Notice>
             {props.aiConsentGranted ? (
-              <SecondaryButton title="Akıllı özellik iznini kapat" onPress={() => void revokeConsent()} disabled={privacyBusy} />
+              <SecondaryButton title={l('Akıllı özellik iznini kapat', 'Turn off smart feature permission')} onPress={() => void revokeConsent()} disabled={privacyBusy} />
             ) : (
-              <PrimaryButton title="Akıllı özelliklere izin ver" onPress={() => void grantConsent()} loading={privacyBusy} />
+              <PrimaryButton title={l('Akıllı özelliklere izin ver', 'Allow smart features')} onPress={() => void grantConsent()} loading={privacyBusy} />
             )}
             <Pressable accessibilityRole="button" onPress={props.onPrivacy} hitSlop={8}>
-              <Text style={styles.inlineLink}>Verilerinin nasıl kullanıldığını gör</Text>
+              <Text style={styles.inlineLink}>{l('Verilerinin nasıl kullanıldığını gör', 'See how your data is used')}</Text>
             </Pressable>
           </View>
 
           {props.account.enabled ? (
             <View style={styles.card}>
               <View style={styles.titleRow}>
-                <Text style={styles.title}>Hesabım</Text>
+                <Text style={styles.title}>{t('settings.account')}</Text>
                 {props.account.user ? (
                   <View style={[styles.statusBadge, styles.statusBadgeActive]}>
-                    <Text style={[styles.statusText, styles.statusTextActive]}>Bağlı</Text>
+                    <Text style={[styles.statusText, styles.statusTextActive]}>{l('Bağlı', 'Connected')}</Text>
                   </View>
                 ) : null}
               </View>
@@ -233,56 +250,57 @@ export function SettingsScreen(props: Props) {
                   {props.account.usage ? (
                     <View style={styles.usageGrid}>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>FOTOĞRAF TANIMA</Text>
+                        <Text style={styles.usageLabel}>{l('FOTOĞRAF TANIMA', 'PHOTO RECOGNITION')}</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyAnalysisLimit - props.account.usage.dailyAnalysisUsed,
                             props.account.usage.monthlyAnalysisLimit - props.account.usage.monthlyAnalysisUsed,
-                          ))} hak
+                          ))} {l('hak', 'credits')}
                         </Text>
                         <Text style={styles.usageDetail}>
-                          Bugün {props.account.usage.dailyAnalysisUsed}/{props.account.usage.dailyAnalysisLimit} · Bu ay {props.account.usage.monthlyAnalysisUsed}/{props.account.usage.monthlyAnalysisLimit}
+                          {l('Bugün', 'Today')} {props.account.usage.dailyAnalysisUsed}/{props.account.usage.dailyAnalysisLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyAnalysisUsed}/{props.account.usage.monthlyAnalysisLimit}
                         </Text>
                       </View>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>KOMBİN ÖNERİSİ</Text>
+                        <Text style={styles.usageLabel}>{l('KOMBİN ÖNERİSİ', 'OUTFIT SUGGESTIONS')}</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyOutfitLimit - props.account.usage.dailyOutfitUsed,
                             props.account.usage.monthlyOutfitLimit - props.account.usage.monthlyOutfitUsed,
-                          ))} hak
+                          ))} {l('hak', 'credits')}
                         </Text>
                         <Text style={styles.usageDetail}>
-                          Bugün {props.account.usage.dailyOutfitUsed}/{props.account.usage.dailyOutfitLimit} · Bu ay {props.account.usage.monthlyOutfitUsed}/{props.account.usage.monthlyOutfitLimit}
+                          {l('Bugün', 'Today')} {props.account.usage.dailyOutfitUsed}/{props.account.usage.dailyOutfitLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyOutfitUsed}/{props.account.usage.monthlyOutfitLimit}
                         </Text>
                       </View>
                     </View>
-                  ) : <Notice>Kullanım hakları şu anda yüklenemedi.</Notice>}
-                  {props.account.stale ? <Notice>Son bilinen hesap bilgileri gösteriliyor; sunucuya şu anda ulaşılamadı.</Notice> : null}
-                  <SecondaryButton title="Hesaptan çık" onPress={() => void signOut()} disabled={accountBusy} />
-                  <DangerButton title="Hesabımı kalıcı olarak sil" onPress={confirmDeleteAccount} disabled={accountBusy} />
+                  ) : <Notice>{l('Kullanım hakları şu anda yüklenemedi.', 'Usage credits could not be loaded.')}</Notice>}
+                  {props.account.stale ? <Notice>{l('Son bilinen hesap bilgileri gösteriliyor; sunucuya şu anda ulaşılamadı.', 'Showing the last known account details because the service is unavailable.')}</Notice> : null}
+                  <SecondaryButton title={t('settings.signOut')} onPress={() => void signOut()} disabled={accountBusy} />
+                  <DangerButton title={t('settings.deleteAccount')} onPress={confirmDeleteAccount} disabled={accountBusy} />
                 </>
               ) : (
                 <>
-                  <Text style={styles.text}>Akıllı özellik haklarını hesabında korumak ve farklı kurulumlarda kaybetmemek için Google ile devam et.</Text>
-                  <PrimaryButton title="Google ile giriş yap" onPress={() => void signIn()} loading={accountBusy} />
+                  <Text style={styles.text}>{t('settings.guestText')}</Text>
+                  <PrimaryButton title={t('settings.signIn')} onPress={() => void signIn()} loading={accountBusy} />
                 </>
               )}
             </View>
           ) : null}
 
           <View style={styles.card}>
-            <Text style={styles.title}>Gizlilik ve veriler</Text>
-            <Text style={styles.text}>Dolabın ve asıl kıyafet fotoğrafların yalnızca bu cihazın uygulamaya ayrılmış alanında tutulur.</Text>
-            <SecondaryButton title="Gizlilik politikasını görüntüle" onPress={props.onPrivacy} />
-            <Text style={styles.deleteHint}>Aşağıdaki işlem yalnızca bu cihazdaki verileri siler ve geri alınamaz.</Text>
-            <DangerButton title="Tüm yerel verilerimi sil" onPress={confirmDeleteAll} disabled={privacyBusy} />
+            <Text style={styles.title}>{l('Gizlilik ve veriler', 'Privacy and data')}</Text>
+            <Text style={styles.text}>{l('Dolabın ve asıl kıyafet fotoğrafların yalnızca bu cihazın uygulamaya ayrılmış alanında tutulur.', 'Your wardrobe and original clothing photos are stored only in the app area on this device.')}</Text>
+            <SecondaryButton title={t('settings.privacy')} onPress={props.onPrivacy} />
+            <SecondaryButton title={t('settings.terms')} onPress={props.onTerms} />
+            <Text style={styles.deleteHint}>{l('Aşağıdaki işlem yalnızca bu cihazdaki verileri siler ve geri alınamaz.', 'The action below deletes data only from this device and cannot be undone.')}</Text>
+            <DangerButton title={t('settings.deleteData')} onPress={confirmDeleteAll} disabled={privacyBusy} />
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.title}>Uygulama hakkında</Text>
+            <Text style={styles.title}>{l('Uygulama hakkında', 'About the app')}</Text>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Sürüm</Text>
+              <Text style={styles.infoLabel}>{l('Sürüm', 'Version')}</Text>
               <Text style={styles.infoValue}>{props.currentVersion}</Text>
             </View>
           </View>
@@ -296,15 +314,15 @@ export function SettingsScreen(props: Props) {
                 style={styles.internalHeader}
               >
                 <View style={styles.internalHeading}>
-                  <Text style={styles.internalEyebrow}>YALNIZCA GELİŞTİRME DERLEMESİ</Text>
-                  <Text style={styles.title}>Geliştirici araçları</Text>
+                  <Text style={styles.internalEyebrow}>{l('YALNIZCA GELİŞTİRME DERLEMESİ', 'DEVELOPMENT BUILD ONLY')}</Text>
+                  <Text style={styles.title}>{l('Geliştirici araçları', 'Developer tools')}</Text>
                 </View>
                 <Text style={styles.expandIcon}>{developerToolsOpen ? '−' : '+'}</Text>
               </Pressable>
               {developerToolsOpen ? (
                 <View style={styles.internalBody}>
                   <Field
-                    label="Backend API adresi"
+                    label={l('Sunucu adresi', 'Service address')}
                     value={url}
                     onChangeText={(value) => {
                       setUrl(value);
@@ -314,9 +332,9 @@ export function SettingsScreen(props: Props) {
                     autoCorrect={false}
                     keyboardType="url"
                     placeholder="https://outfit-combination-api.onrender.com"
-                    hint="Dağıtımda HTTPS, yerel geliştirmede bilgisayarın IPv4 adresini kullan."
+                    hint={l('Dağıtımda HTTPS, yerel geliştirmede bilgisayarın IPv4 adresini kullan.', 'Use HTTPS in distribution and the computer IPv4 address for local development.')}
                   />
-                  {!validUrl ? <Notice tone="error">Geçerli bir API adresi gir.</Notice> : null}
+                  {!validUrl ? <Notice tone="error">{l('Geçerli bir sunucu adresi gir.', 'Enter a valid service address.')}</Notice> : null}
                   <View style={styles.connectionRow}>
                     <View style={[
                       styles.dot,
@@ -327,11 +345,11 @@ export function SettingsScreen(props: Props) {
                     <Text style={styles.connectionText}>{connectionText}</Text>
                   </View>
                   <SecondaryButton
-                    title={connection === 'checking' ? 'Kontrol ediliyor…' : 'Bağlantıyı test et'}
+                    title={connection === 'checking' ? l('Kontrol ediliyor…', 'Checking…') : l('Bağlantıyı test et', 'Test connection')}
                     onPress={() => void testConnection()}
                     disabled={connection === 'checking' || !validUrl}
                   />
-                  <PrimaryButton title="API adresini kaydet" onPress={() => void saveApiUrl()} loading={busy} disabled={!validUrl} />
+                  <PrimaryButton title={l('Sunucu adresini kaydet', 'Save service address')} onPress={() => void saveApiUrl()} loading={busy} disabled={!validUrl} />
                 </View>
               ) : null}
             </View>
@@ -374,6 +392,8 @@ const styles = StyleSheet.create({
   usageLabel: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
   usageValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
   usageDetail: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  languageRow: { flexDirection: 'row', gap: spacing.sm },
+  languageButton: { flex: 1 },
   internalCard: {
     borderRadius: radius.lg,
     borderWidth: 1,

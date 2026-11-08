@@ -71,8 +71,8 @@ public sealed class InstallationTokenService
 
         try
         {
-            var payloadBytes = WebEncoders.Base64UrlDecode(parts[0]);
-            var providedSignature = WebEncoders.Base64UrlDecode(parts[1]);
+            if (!TryDecodeCanonical(parts[0], out var payloadBytes)
+                || !TryDecodeCanonical(parts[1], out var providedSignature)) return false;
             var expectedSignature = HMACSHA256.HashData(signingKey, payloadBytes);
             if (!CryptographicOperations.FixedTimeEquals(expectedSignature, providedSignature)) return false;
 
@@ -127,14 +127,31 @@ public sealed class InstallationTokenService
         if (parts.Length != 2) return false;
         try
         {
-            payloadBytes = WebEncoders.Base64UrlDecode(parts[0]);
-            var providedSignature = WebEncoders.Base64UrlDecode(parts[1]);
+            if (!TryDecodeCanonical(parts[0], out payloadBytes)
+                || !TryDecodeCanonical(parts[1], out var providedSignature)) return false;
             var expectedSignature = HMACSHA256.HashData(signingKey, payloadBytes);
             return CryptographicOperations.FixedTimeEquals(expectedSignature, providedSignature);
         }
         catch (FormatException)
         {
             payloadBytes = [];
+            return false;
+        }
+    }
+
+    private static bool TryDecodeCanonical(string value, out byte[] bytes)
+    {
+        bytes = [];
+        try
+        {
+            bytes = WebEncoders.Base64UrlDecode(value);
+            if (string.Equals(WebEncoders.Base64UrlEncode(bytes), value, StringComparison.Ordinal)) return true;
+            bytes = [];
+            return false;
+        }
+        catch (FormatException)
+        {
+            bytes = [];
             return false;
         }
     }

@@ -1,6 +1,6 @@
 # Outfit Combination
 
-An Android-first wardrobe and outfit recommendation app. The mobile UI is in Turkish. Clothing records are stored in SQLite and photos are kept in the app's persistent document storage. The backend handles optional Google account sessions, per-user AI usage rights, one-time clothing photo analysis, AI outfit suggestions, and mobile version information.
+An Android-first wardrobe and outfit recommendation app with Turkish and English UI. Clothing records are stored in account-separated SQLite wardrobes and photos are kept in the app's persistent document storage. The backend handles Google or passwordless email sessions, account-and-installation AI usage rights, one-time clothing photo analysis, AI outfit suggestions, and mobile version information.
 
 ## Project structure
 
@@ -30,13 +30,20 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub, EAS, and Render setup.
 - Generated 420 px thumbnails and a virtualized wardrobe grid for larger closets
 - Eight-second undo for clothing deletion with crash-safe cleanup
 - First-run onboarding and local learning from repeated AI field corrections
+- Turkish and English UI, legal text, and AI responses
+- Auth-first entry with Google, passwordless email code, or an explicit local guest path
+- Separate on-device wardrobes when accounts are switched; switching accounts never deletes another wardrobe
+- Exact duplicate-photo detection before saving
+- Outfit search and richer wardrobe filters for recent, summer, and winter items
+- Per-outfit like/dislike feedback, pinned-piece replacement, and a local wear history
 - Responsive phone, tablet, BlueStacks, portrait, and landscape layouts
 - Per-action manual entry and local outfit suggestions that work without an API key or running backend
 - Explicit consent before any clothing photo or wardrobe metadata is sent to AI
 - Two-step deletion of all local clothing, photos, favorites, drafts, and settings
-- Optional Google account sessions with in-app account deletion and per-user AI usage rights
+- Optional Google and passwordless email account sessions with in-app account deletion
 - Server-signed, time-limited installation and account access tokens
-- Persistent daily and monthly AI cost quotas backed by Neon PostgreSQL
+- Account and installation access tokens encrypted at rest with Android Keystore in native APK builds
+- Persistent daily and monthly AI cost quotas enforced against both the account and installation, backed by Neon PostgreSQL
 - In-app privacy/KVKK text, a public GitHub Pages policy, and a Play Data Safety draft
 - Startup version check for new APK releases
 - Expo OTA updates for compatible JavaScript and asset changes
@@ -89,14 +96,20 @@ $env:UsageQuota__ConnectionString="Host=...;Database=neondb;Username=...;Passwor
 $env:AccountAuth__GoogleClientId="your-web-client-id.apps.googleusercontent.com"
 $env:AccountAuth__GoogleClientSecret="your-google-client-secret"
 $env:AccountAuth__CallbackUrl="https://your-api.example.com/api/account/google/callback"
+# Optional passwordless email authentication (Resend-compatible endpoint):
+$env:EmailAuth__ApiKey="your-email-provider-key"
+$env:EmailAuth__FromAddress="login@your-verified-domain.example"
+$env:EmailAuth__FromName="Outfit Combination"
 dotnet restore
 dotnet build
 dotnet run --urls http://0.0.0.0:5080
 ```
 
-Do not place the OpenAI key, signing key, Google client secret, or Neon connection string in source files, `appsettings.json`, Expo variables, the mobile app, or Git. The Google web client ID is public, but this implementation keeps all Google OAuth configuration on the backend. Local Development can use an in-memory quota fallback. Production fails closed and does not send an AI request when the persistent quota database is missing or unavailable.
+Do not place the OpenAI key, signing key, Google client secret, email provider key, or Neon connection string in source files, `appsettings.json`, Expo variables, the mobile app, or Git. The Google web client ID is public, but this implementation keeps all Google OAuth configuration on the backend. Local Development can use an in-memory quota fallback. Production fails closed and does not send an AI request when the persistent quota database is missing or unavailable.
 
-Google account access is disabled when the three `AccountAuth` values are empty. When enabled, the app opens Google's browser sign-in, the callback returns to the `outfitcombination://auth` app link with a short-lived one-time code, and AI quotas are keyed to the verified account. The same Neon database is used; `app_users`, temporary OAuth tables, and usage tables are created automatically. The wardrobe and photos still remain only on the phone.
+Google access is disabled when the three `AccountAuth` values are empty. Passwordless email access is disabled unless both `EmailAuth__ApiKey` and a valid `EmailAuth__FromAddress` are configured. A Production backend requires at least one of these providers and fails to start instead of silently allowing account-free AI access. Development can still run without either provider. Google opens the browser and returns a short-lived one-time code through `outfitcombination://auth`; email sends a six-digit, short-lived code. Both methods resolve to a stable internal account UUID. The same Neon database is used; profile, identity-link, temporary login-code, and usage tables are created automatically. No second Neon database or manual migration is required.
+
+AI quotas are checked against both the signed-in account UUID and the random installation UUID. The stricter remaining allowance wins, so changing email accounts on one installation cannot reset the device allowance. Wardrobe records and photos still remain only on the phone. The first signed-in account may claim an existing guest wardrobe once; later account switching selects that account's own local wardrobe without deleting any other wardrobe.
 
 Health and version endpoints:
 
@@ -163,7 +176,7 @@ To install in BlueStacks, drag the downloaded APK onto the BlueStacks window or 
 
 The Render Blueprint uses the Free compute plan. The service can spin down after an idle period, so clothing analysis and outfit requests allow up to 90 seconds for a cold start. A failed analysis keeps its local draft and can be retried safely.
 
-The public app page and legal documents are published from `privacy-site/` by `.github/workflows/privacy-pages.yml`. Enable **Settings > Pages > Build and deployment > GitHub Actions** once. The homepage is `https://huseyinorer.github.io/outfit-combination/`, the privacy policy is `/privacy.html`, and the terms are `/terms.html`. Review the developer name and support contact before a Play Store submission. `docs/PLAY_DATA_SAFETY_TR.md` contains the current Play Console declaration draft.
+The public app page and legal documents are published from `privacy-site/` by `.github/workflows/privacy-pages.yml`. Enable **Settings > Pages > Build and deployment > GitHub Actions** once. The English homepage is `https://huseyinorer.github.io/outfit-combination/`; Turkish pages are under `/tr/`. Review the developer name and support contact before a Play Store submission. `docs/PLAY_DATA_SAFETY_TR.md` contains the current Play Console declaration draft.
 
 Compatible TypeScript, styling, text, and asset changes can use OTA updates. Native dependencies, Expo plugins, Android permissions, manifests, and SDK changes require a new APK version.
 
@@ -176,7 +189,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.3.1`. Increment both files together for the next native release.
+The current native app version is `1.3.2`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -204,6 +217,8 @@ Verified test scenarios include:
 - Invalid or wrong-category AI IDs
 - Valid, tampered, and expired installation access tokens
 - User-session token validation and separation from installation tokens
+- Passwordless email normalization/configuration and account identity linking
+- Dual account-and-installation quota enforcement and refunds
 - Mismatched image signatures and oversized outfit metadata
 - Duplicate AI combinations
 - Manual records after an API outage
@@ -213,11 +228,12 @@ Verified test scenarios include:
 Current local verification:
 
 - Mobile TypeScript check passed
-- Mobile tests: 16/16 passed
-- Mobile/app version consistency passed for 1.3.1
-- Android Metro export passed with the local update-installer module included; Expo Autolinking resolved the Android module successfully
+- Mobile tests: 17/17 passed
+- Mobile/app version consistency passed for 1.3.2
+- Android Metro export passed (Hermes bytecode was skipped only because this managed Windows shell blocks child executable launch); Expo Autolinking resolved both the update-installer and Keystore-backed secure-session modules
+- Expo Doctor could not be fetched in the network-restricted local environment and remains part of GitHub CI
 - This Windows environment has no Java/Android SDK, so the local Kotlin/Gradle build remains for EAS to verify
-- The managed local environment could not download Npgsql from NuGet, so the GitHub backend check must verify the normal restore/build and 17 backend scenarios
+- The API source compiled locally against a temporary Npgsql surface and all 20 backend scenarios passed; the managed local environment could not reach NuGet, so GitHub CI must still verify the real Npgsql restore/build
 
 SQLite persistence, camera orientation, and final photo placement still require validation inside BlueStacks or on a physical Android device.
 

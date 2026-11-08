@@ -1,11 +1,13 @@
 import { AppState, Linking } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
-import { deleteSetting, getSetting, setSetting } from '../data/database';
 import { normalizeApiBaseUrl } from '../domain/apiUrl';
+import type { AppLanguage } from '../locales';
 import { installationAuthenticatedFetch } from './installationAuth';
+import { deleteSecureSession, getSecureSession, setSecureSession } from './secureSessionStorage';
 
 const SESSION_KEY = 'account_session_v1';
 const CONFIG_TTL_MS = 5 * 60 * 1_000;
+const CONFIG_TIMEOUT_MS = 12_000;
 const REQUEST_TIMEOUT_MS = 90_000;
 
 export interface AccountUser {
@@ -32,10 +34,14 @@ interface StoredSession {
   expiresAt: string;
   user: AccountUser;
   usage: AccountUsage | null;
+  googleEnabled?: boolean;
+  emailEnabled?: boolean;
 }
 
 export interface AccountState {
   enabled: boolean;
+  googleEnabled: boolean;
+  emailEnabled: boolean;
   user: AccountUser | null;
   usage: AccountUsage | null;
   stale?: boolean;
@@ -43,21 +49,25 @@ export interface AccountState {
 
 interface ConfigCache {
   enabled: boolean;
+  googleEnabled: boolean;
+  emailEnabled: boolean;
   expiresAt: number;
 }
 
 const configCache = new Map<string, ConfigCache>();
 let initialLinkChecked = false;
 
-function cleanUrl(baseUrl: string): string {
+const message = (language: AppLanguage, turkish: string, english: string) => language === 'tr' ? turkish : english;
+
+function cleanUrl(baseUrl: string, language: AppLanguage = 'tr'): string {
   const value = normalizeApiBaseUrl(baseUrl);
-  if (!value) throw new Error('API adresi ayarlanmamış.');
+  if (!value) throw new Error(message(language, 'Sunucu adresi ayarlanmamış.', 'The service address is not configured.'));
   return value;
 }
 
-async function withTimeout(url: string, init?: RequestInit): Promise<Response> {
+async function withTimeout(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await expoFetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -65,29 +75,56 @@ async function withTimeout(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
-async function readError(response: Response, fallback: string): Promise<string> {
+async function readError(
+  response: Response,
+  fallback: string,
+  language: AppLanguage = 'tr',
+): Promise<string> {
   try {
-    const body = (await response.json()) as { message?: string };
+    const body = (await response.json()) as { code?: string; message?: string };
+    if (language === 'en') {
+      const localized: Record<string, string> = {
+        email_auth_unavailable: 'Email sign-in is not available yet.',
+        account_store_unavailable: 'The account service is temporarily unavailable.',
+        invalid_email: 'Enter a valid email address.',
+        email_code_throttled: 'Wait a short while before requesting another code.',
+        email_delivery_failed: 'The sign-in code could not be delivered. Try again shortly.',
+        invalid_email_code: 'The code is invalid or expired. Request a new code.',
+      };
+      return (body.code ? localized[body.code] : undefined) ?? fallback;
+    }
     return body.message ?? fallback;
   } catch {
     return fallback;
   }
 }
 
-async function accountConfig(baseUrl: string, force = false): Promise<boolean> {
-  const cleanBaseUrl = cleanUrl(baseUrl);
+async function accountConfig(baseUrl: string, force = false, language: AppLanguage = 'tr'): Promise<ConfigCache> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
   const cached = configCache.get(cleanBaseUrl);
-  if (!force && cached && cached.expiresAt > Date.now()) return cached.enabled;
-  const response = await withTimeout(`${cleanBaseUrl}/api/account/config`);
+  if (!force && cached && cached.expiresAt > Date.now()) return cached;
+  // Do not keep the first screen blocked for an entire Render Free cold start.
+  // A retry wakes the service while guest/local features remain immediately available.
+  const response = await withTimeout(`${cleanBaseUrl}/api/account/config`, undefined, CONFIG_TIMEOUT_MS);
   if (response.status === 404) {
-    configCache.set(cleanBaseUrl, { enabled: false, expiresAt: Date.now() + CONFIG_TTL_MS });
-    return false;
+    const unavailable = { enabled: false, googleEnabled: false, emailEnabled: false, expiresAt: Date.now() + CONFIG_TTL_MS };
+    configCache.set(cleanBaseUrl, unavailable);
+    return unavailable;
   }
-  if (!response.ok) throw new Error(await readError(response, 'Hesap servisine ulaşılamadı.'));
-  const body = (await response.json()) as { enabled?: boolean };
-  const enabled = body.enabled === true;
-  configCache.set(cleanBaseUrl, { enabled, expiresAt: Date.now() + CONFIG_TTL_MS });
-  return enabled;
+  if (!response.ok) throw new Error(await readError(
+    response,
+    message(language, 'Hesap servisine ulaşılamadı.', 'The account service could not be reached.'),
+    language,
+  ));
+  const body = (await response.json()) as { enabled?: boolean; googleEnabled?: boolean; emailEnabled?: boolean };
+  const result = {
+    enabled: body.enabled === true,
+    googleEnabled: body.googleEnabled === true || (body.enabled === true && body.googleEnabled === undefined),
+    emailEnabled: body.emailEnabled === true,
+    expiresAt: Date.now() + CONFIG_TTL_MS,
+  };
+  configCache.set(cleanBaseUrl, result);
+  return result;
 }
 
 function parseSession(raw: string | null, baseUrl: string): StoredSession | null {
@@ -109,41 +146,68 @@ function parseSession(raw: string | null, baseUrl: string): StoredSession | null
 }
 
 async function storedSession(baseUrl: string): Promise<StoredSession | null> {
-  const session = parseSession(await getSetting(SESSION_KEY), baseUrl);
-  if (!session) await deleteSetting(SESSION_KEY);
+  const session = parseSession(await getSecureSession(SESSION_KEY), baseUrl);
+  if (!session) await deleteSecureSession(SESSION_KEY);
   return session;
 }
 
 async function saveSession(session: StoredSession): Promise<void> {
-  await setSetting(SESSION_KEY, JSON.stringify(session));
+  await setSecureSession(SESSION_KEY, JSON.stringify(session));
 }
 
-export async function loadAccountState(baseUrl: string): Promise<AccountState> {
-  const cleanBaseUrl = cleanUrl(baseUrl);
-  const enabled = await accountConfig(cleanBaseUrl);
-  if (!enabled) return { enabled: false, user: null, usage: null };
+export async function loadAccountState(
+  baseUrl: string,
+  language: AppLanguage = 'tr',
+  forceConfigurationRefresh = false,
+): Promise<AccountState> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
   const session = await storedSession(cleanBaseUrl);
-  if (!session) return { enabled: true, user: null, usage: null };
+  let config: ConfigCache;
+  try {
+    config = await accountConfig(cleanBaseUrl, forceConfigurationRefresh, language);
+  } catch {
+    if (session) return {
+      enabled: true,
+      googleEnabled: session.googleEnabled ?? true,
+      emailEnabled: session.emailEnabled ?? false,
+      user: session.user,
+      usage: session.usage,
+      stale: true,
+    };
+    throw new Error(message(
+      language,
+      'Hesap servisine şu anda ulaşılamıyor. İnternet bağlantını kontrol et.',
+      'The account service is unavailable. Check your internet connection.',
+    ));
+  }
+  if (!config.enabled) return { enabled: false, googleEnabled: false, emailEnabled: false, user: null, usage: null };
+  if (!session) return { ...config, user: null, usage: null };
 
   try {
     const response = await withTimeout(`${cleanBaseUrl}/api/account/me`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
     });
     if (response.status === 401 || response.status === 404) {
-      await deleteSetting(SESSION_KEY);
-      return { enabled: true, user: null, usage: null };
+      await deleteSecureSession(SESSION_KEY);
+      return { ...config, user: null, usage: null };
     }
-    if (!response.ok) return { enabled: true, user: session.user, usage: session.usage, stale: true };
+    if (!response.ok) return { ...config, user: session.user, usage: session.usage, stale: true };
     const body = (await response.json()) as { user: AccountUser; usage: AccountUsage | null };
-    const refreshed = { ...session, user: body.user, usage: body.usage };
+    const refreshed = {
+      ...session,
+      user: body.user,
+      usage: body.usage,
+      googleEnabled: config.googleEnabled,
+      emailEnabled: config.emailEnabled,
+    };
     await saveSession(refreshed);
-    return { enabled: true, user: body.user, usage: body.usage };
+    return { ...config, user: body.user, usage: body.usage };
   } catch {
-    return { enabled: true, user: session.user, usage: session.usage, stale: true };
+    return { ...config, user: session.user, usage: session.usage, stale: true };
   }
 }
 
-function waitForAccountLink(): { promise: Promise<string>; cancel: () => void } {
+function waitForAccountLink(language: AppLanguage): { promise: Promise<string>; cancel: () => void } {
   let subscription: ReturnType<typeof Linking.addEventListener> | null = null;
   let appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
   let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -164,7 +228,7 @@ function waitForAccountLink(): { promise: Promise<string>; cancel: () => void } 
       if (!url.toLowerCase().startsWith('outfitcombination://auth')) return;
       cleanup();
       try {
-        resolve(accountCodeFromLink(url));
+        resolve(accountCodeFromLink(url, language));
       } catch (error) {
         reject(error);
       }
@@ -174,13 +238,13 @@ function waitForAccountLink(): { promise: Promise<string>; cancel: () => void } 
       if (state === 'active' && leftApp && !returnTimer) {
         returnTimer = setTimeout(() => {
           cleanup();
-          reject(new Error('Google ile giriş tamamlanmadı. Yeniden deneyebilirsin.'));
+          reject(new Error(message(language, 'Google ile giriş tamamlanmadı. Yeniden deneyebilirsin.', 'Google sign-in was not completed. Try again.')));
         }, 1_500);
       }
     });
     timeout = setTimeout(() => {
       cleanup();
-      reject(new Error('Google ile giriş süresi doldu. Yeniden deneyebilirsin.'));
+      reject(new Error(message(language, 'Google ile giriş süresi doldu. Yeniden deneyebilirsin.', 'Google sign-in timed out. Try again.')));
     }, 3 * 60 * 1_000);
   });
   return {
@@ -189,39 +253,53 @@ function waitForAccountLink(): { promise: Promise<string>; cancel: () => void } 
   };
 }
 
-function accountCodeFromLink(url: string): string {
+function accountCodeFromLink(url: string, language: AppLanguage): string {
   const parsed = new URL(url);
   const error = parsed.searchParams.get('error');
-  if (error) throw new Error(error === 'cancelled' ? 'Google ile giriş iptal edildi.' : 'Google ile giriş tamamlanamadı.');
+  if (error) throw new Error(error === 'cancelled'
+    ? message(language, 'Google ile giriş iptal edildi.', 'Google sign-in was cancelled.')
+    : message(language, 'Google ile giriş tamamlanamadı.', 'Google sign-in could not be completed.'));
   const code = parsed.searchParams.get('code');
-  if (!code) throw new Error('Uygulama geçerli bir oturum kodu alamadı.');
+  if (!code) throw new Error(message(language, 'Uygulama geçerli bir oturum kodu alamadı.', 'The app did not receive a valid sign-in code.'));
   return code;
 }
 
-async function completeAccountCode(baseUrl: string, code: string): Promise<AccountState> {
+async function completeAccountCode(baseUrl: string, code: string, language: AppLanguage): Promise<AccountState> {
   const completeResponse = await installationAuthenticatedFetch(baseUrl, '/api/account/google/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
-  });
-  if (!completeResponse.ok) throw new Error(await readError(completeResponse, 'Google oturumu tamamlanamadı.'));
+  }, undefined, language);
+  if (!completeResponse.ok) throw new Error(await readError(
+    completeResponse,
+    message(language, 'Google oturumu tamamlanamadı.', 'Google sign-in could not be completed.'),
+    language,
+  ));
   const session = (await completeResponse.json()) as StoredSession;
   const stored: StoredSession = { ...session, baseUrl };
   await saveSession(stored);
-  return { enabled: true, user: stored.user, usage: stored.usage };
+  const config = await accountConfig(baseUrl, false, language);
+  const configured = { ...stored, googleEnabled: config.googleEnabled, emailEnabled: config.emailEnabled };
+  await saveSession(configured);
+  return { ...config, user: configured.user, usage: configured.usage };
 }
 
-export async function signInWithGoogle(baseUrl: string): Promise<AccountState> {
-  const cleanBaseUrl = cleanUrl(baseUrl);
-  if (!await accountConfig(cleanBaseUrl, true)) return { enabled: false, user: null, usage: null };
+export async function signInWithGoogle(baseUrl: string, language: AppLanguage = 'tr'): Promise<AccountState> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
+  const config = await accountConfig(cleanBaseUrl, true, language);
+  if (!config.googleEnabled) throw new Error(message(language, 'Google ile giriş şu anda kullanılamıyor.', 'Google sign-in is currently unavailable.'));
   const startResponse = await installationAuthenticatedFetch(cleanBaseUrl, '/api/account/google/start', {
     method: 'POST',
-  });
-  if (!startResponse.ok) throw new Error(await readError(startResponse, 'Google ile giriş başlatılamadı.'));
+  }, undefined, language);
+  if (!startResponse.ok) throw new Error(await readError(
+    startResponse,
+    message(language, 'Google ile giriş başlatılamadı.', 'Google sign-in could not be started.'),
+    language,
+  ));
   const start = (await startResponse.json()) as { authorizationUrl?: string };
-  if (!start.authorizationUrl) throw new Error('Sunucu geçerli bir Google giriş adresi döndürmedi.');
+  if (!start.authorizationUrl) throw new Error(message(language, 'Sunucu geçerli bir Google giriş adresi döndürmedi.', 'The service did not return a valid Google sign-in address.'));
 
-  const link = waitForAccountLink();
+  const link = waitForAccountLink(language);
   try {
     await Linking.openURL(start.authorizationUrl);
   } catch (error) {
@@ -229,38 +307,84 @@ export async function signInWithGoogle(baseUrl: string): Promise<AccountState> {
     throw error;
   }
   const code = await link.promise;
-  return completeAccountCode(cleanBaseUrl, code);
+  return completeAccountCode(cleanBaseUrl, code, language);
 }
 
-export async function completeInitialAccountSignIn(baseUrl: string): Promise<AccountState | null> {
+export async function completeInitialAccountSignIn(baseUrl: string, language: AppLanguage = 'tr'): Promise<AccountState | null> {
   if (initialLinkChecked) return null;
   initialLinkChecked = true;
   const url = await Linking.getInitialURL();
   if (!url?.toLowerCase().startsWith('outfitcombination://auth')) return null;
-  return completeAccountCode(cleanUrl(baseUrl), accountCodeFromLink(url));
+  return completeAccountCode(cleanUrl(baseUrl, language), accountCodeFromLink(url, language), language);
 }
 
-export async function ensureAccountForAi(baseUrl: string): Promise<AccountState> {
-  const state = await loadAccountState(baseUrl);
+export async function ensureAccountForAi(baseUrl: string, language: AppLanguage = 'tr'): Promise<AccountState> {
+  const state = await loadAccountState(baseUrl, language);
   if (!state.enabled || state.user) return state;
-  return signInWithGoogle(baseUrl);
+  throw new Error(message(language, 'Akıllı özellikleri kullanmak için hesabına giriş yap.', 'Sign in to use smart features.'));
+}
+
+export async function requestEmailSignInCode(
+  baseUrl: string,
+  email: string,
+  language: 'tr' | 'en',
+): Promise<void> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
+  const config = await accountConfig(cleanBaseUrl, true, language);
+  if (!config.emailEnabled) throw new Error(message(language, 'E-posta ile giriş şu anda kullanılamıyor.', 'Email sign-in is currently unavailable.'));
+  const response = await installationAuthenticatedFetch(cleanBaseUrl, '/api/account/email/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, language }),
+  }, undefined, language);
+  if (!response.ok) throw new Error(await readError(
+    response,
+    message(language, 'Giriş kodu gönderilemedi.', 'The sign-in code could not be sent.'),
+    language,
+  ));
+}
+
+export async function completeEmailSignIn(
+  baseUrl: string,
+  email: string,
+  code: string,
+  language: AppLanguage = 'tr',
+): Promise<AccountState> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
+  const response = await installationAuthenticatedFetch(cleanBaseUrl, '/api/account/email/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  }, undefined, language);
+  if (!response.ok) throw new Error(await readError(
+    response,
+    message(language, 'Giriş kodu doğrulanamadı.', 'The sign-in code could not be verified.'),
+    language,
+  ));
+  const session = (await response.json()) as StoredSession;
+  const stored: StoredSession = { ...session, baseUrl: cleanBaseUrl };
+  await saveSession(stored);
+  const config = await accountConfig(cleanBaseUrl, false, language);
+  const configured = { ...stored, googleEnabled: config.googleEnabled, emailEnabled: config.emailEnabled };
+  await saveSession(configured);
+  return { ...config, user: configured.user, usage: configured.usage };
 }
 
 export async function signOutAccount(): Promise<void> {
-  await deleteSetting(SESSION_KEY);
+  await deleteSecureSession(SESSION_KEY);
 }
 
-export async function deleteAccount(baseUrl: string): Promise<void> {
-  const cleanBaseUrl = cleanUrl(baseUrl);
+export async function deleteAccount(baseUrl: string, language: AppLanguage = 'tr'): Promise<void> {
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
   const session = await storedSession(cleanBaseUrl);
-  if (!session) throw new Error('Silinecek aktif hesap oturumu bulunamadı.');
+  if (!session) throw new Error(message(language, 'Silinecek aktif hesap oturumu bulunamadı.', 'There is no active account session to delete.'));
   const response = await withTimeout(`${cleanBaseUrl}/api/account`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${session.accessToken}` },
   });
   if (!response.ok && response.status !== 404)
-    throw new Error(await readError(response, 'Hesap silinemedi.'));
-  await deleteSetting(SESSION_KEY);
+    throw new Error(await readError(response, message(language, 'Hesap silinemedi.', 'The account could not be deleted.'), language));
+  await deleteSecureSession(SESSION_KEY);
 }
 
 export async function accountAuthenticatedFetch(
@@ -268,16 +392,17 @@ export async function accountAuthenticatedFetch(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
+  language: AppLanguage = 'tr',
 ): Promise<Response> {
-  const cleanBaseUrl = cleanUrl(baseUrl);
-  if (!await accountConfig(cleanBaseUrl))
-    return installationAuthenticatedFetch(cleanBaseUrl, path, init, signal);
+  const cleanBaseUrl = cleanUrl(baseUrl, language);
+  if (!(await accountConfig(cleanBaseUrl, false, language)).enabled)
+    return installationAuthenticatedFetch(cleanBaseUrl, path, init, signal, language);
 
   const session = await storedSession(cleanBaseUrl);
-  if (!session) throw new Error('AI özelliğini kullanmak için Google hesabınla giriş yap.');
+  if (!session) throw new Error(message(language, 'Akıllı özelliği kullanmak için hesabına giriş yap.', 'Sign in to use this smart feature.'));
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${session.accessToken}`);
   const response = await expoFetch(`${cleanBaseUrl}${path}`, { ...init, headers, signal });
-  if (response.status === 401) await deleteSetting(SESSION_KEY);
+  if (response.status === 401) await deleteSecureSession(SESSION_KEY);
   return response;
 }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using OutfitCombination.Api.Models;
 using OutfitCombination.Api.Services;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 
@@ -19,6 +20,7 @@ builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("Open
 builder.Services.Configure<MobileUpdateOptions>(builder.Configuration.GetSection("MobileUpdate"));
 builder.Services.Configure<AppSecurityOptions>(builder.Configuration.GetSection("AppSecurity"));
 builder.Services.Configure<AccountAuthOptions>(builder.Configuration.GetSection("AccountAuth"));
+builder.Services.Configure<EmailAuthOptions>(builder.Configuration.GetSection("EmailAuth"));
 builder.Services.Configure<UsageQuotaOptions>(builder.Configuration.GetSection("UsageQuota"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<InstallationTokenService>();
@@ -33,11 +35,14 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 15 * 1024 * 1024);
 builder.Services.AddHttpClient<OpenAiWardrobeService>(client => client.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddHttpClient<GoogleOAuthService>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<EmailOtpSender>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddCors(options => options.AddPolicy("lan", policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var securityConfig = builder.Configuration.GetSection("AppSecurity").Get<AppSecurityOptions>() ?? new AppSecurityOptions();
 var accountConfig = builder.Configuration.GetSection("AccountAuth").Get<AccountAuthOptions>() ?? new AccountAuthOptions();
+var emailConfig = builder.Configuration.GetSection("EmailAuth").Get<EmailAuthOptions>() ?? new EmailAuthOptions();
+var accountAuthEnabled = accountConfig.GoogleEnabled || emailConfig.Enabled;
 if (!builder.Environment.IsDevelopment()
     && System.Text.Encoding.UTF8.GetByteCount(securityConfig.TokenSigningKey?.Trim() ?? string.Empty) < 32)
 {
@@ -47,8 +52,14 @@ if (!builder.Environment.IsDevelopment()
 if (accountConfig.PartiallyConfigured)
     throw new InvalidOperationException(
         "AccountAuth etkinleştirilecekse GoogleClientId, GoogleClientSecret ve CallbackUrl birlikte ayarlanmalıdır.");
+if (emailConfig.PartiallyConfigured)
+    throw new InvalidOperationException(
+        "EmailAuth etkinleştirilecekse ApiKey ve geçerli FromAddress birlikte ayarlanmalıdır.");
+if (!builder.Environment.IsDevelopment() && !accountAuthEnabled)
+    throw new InvalidOperationException(
+        "Production ortamında Google veya e-posta hesap sağlayıcılarından en az biri yapılandırılmalıdır.");
 if (!builder.Environment.IsDevelopment()
-    && accountConfig.Enabled
+    && accountConfig.GoogleEnabled
     && (!Uri.TryCreate(accountConfig.CallbackUrl, UriKind.Absolute, out var callbackUri)
         || callbackUri.Scheme != Uri.UriSchemeHttps))
     throw new InvalidOperationException("Production AccountAuth:CallbackUrl HTTPS olmalıdır.");
@@ -77,9 +88,7 @@ builder.Services.AddRateLimiter(options =>
             }));
     options.AddPolicy("ai", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            context.Items.TryGetValue(InstallationTokenService.UserContextItemKey, out var userValue)
-                ? $"ai:user:{userValue}"
-                : context.Items.TryGetValue(InstallationTokenService.ContextItemKey, out var value)
+            context.Items.TryGetValue(InstallationTokenService.ContextItemKey, out var value)
                 ? $"ai:installation:{value}"
                 : $"ai:{context.Connection.RemoteIpAddress}",
             _ => new FixedWindowRateLimiterOptions
@@ -109,7 +118,9 @@ app.Use(async (context, next) =>
     var aiPath = context.Request.Path.StartsWithSegments("/api/analyze")
         || context.Request.Path.StartsWithSegments("/api/outfits");
     var accountExchangePath = context.Request.Path.StartsWithSegments("/api/account/google/start")
-        || context.Request.Path.StartsWithSegments("/api/account/google/complete");
+        || context.Request.Path.StartsWithSegments("/api/account/google/complete")
+        || context.Request.Path.StartsWithSegments("/api/account/email/start")
+        || context.Request.Path.StartsWithSegments("/api/account/email/complete");
     var accountPath = context.Request.Path.StartsWithSegments("/api/account/me")
         || (context.Request.Method == HttpMethods.Delete && context.Request.Path.Equals("/api/account"));
     if (!aiPath && !accountExchangePath && !accountPath)
@@ -124,7 +135,7 @@ app.Use(async (context, next) =>
         : string.Empty;
     var tokens = context.RequestServices.GetRequiredService<InstallationTokenService>();
 
-    if ((aiPath && accountConfig.Enabled) || accountPath)
+    if ((aiPath && accountAuthEnabled) || accountPath)
     {
         if (tokens.TryValidateUser(bearer, out var userId, out var userInstallationId))
         {
@@ -142,7 +153,7 @@ app.Use(async (context, next) =>
         await context.Response.WriteAsJsonAsync(new
         {
             code = "account_session_required",
-            message = "AI özelliklerini kullanmak için Google hesabınla giriş yap."
+            message = "AI özelliklerini kullanmak için hesabınla giriş yap."
         });
         return;
     }
@@ -169,7 +180,7 @@ app.MapGet("/health", (PersistentUsageQuotaService quota, AccountStore accounts)
     status = "ok",
     quotaPersistence = quota.IsPersistent ? "postgres" : "not_configured",
     accountPersistence = accounts.IsPersistent ? "postgres" : "not_configured",
-    accountAuth = accountConfig.Enabled ? "enabled" : "disabled"
+    accountAuth = accountAuthEnabled ? "enabled" : "disabled"
 }));
 
 app.MapGet("/api/version", (MobileVersionService versions, IOptions<MobileUpdateOptions> options) =>
@@ -203,9 +214,11 @@ app.MapPost("/api/installations/register", (
     });
 }).RequireRateLimiting("installation-registration");
 
-app.MapGet("/api/account/config", (IOptions<AccountAuthOptions> options) => Results.Ok(new
+app.MapGet("/api/account/config", (IOptions<AccountAuthOptions> googleOptions, IOptions<EmailAuthOptions> emailOptions) => Results.Ok(new
 {
-    enabled = options.Value.Enabled
+    enabled = googleOptions.Value.GoogleEnabled || emailOptions.Value.Enabled,
+    googleEnabled = googleOptions.Value.GoogleEnabled,
+    emailEnabled = emailOptions.Value.Enabled
 }));
 
 app.MapPost("/api/account/google/start", async (
@@ -215,7 +228,7 @@ app.MapPost("/api/account/google/start", async (
     IOptions<AccountAuthOptions> options,
     CancellationToken cancellationToken) =>
 {
-    if (!options.Value.Enabled)
+    if (!options.Value.GoogleEnabled)
         return Results.Json(new { message = "Google hesabı henüz yapılandırılmamış." }, statusCode: StatusCodes.Status503ServiceUnavailable);
     if (!accounts.IsPersistent)
         return Results.Json(new { message = "Hesap veritabanına şu anda ulaşılamıyor." }, statusCode: StatusCodes.Status503ServiceUnavailable);
@@ -241,7 +254,7 @@ app.MapGet("/api/account/google/callback", async (
     response.Headers.Pragma = "no-cache";
     response.Headers["Referrer-Policy"] = "no-referrer";
     response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
-    if (!options.Value.Enabled)
+    if (!options.Value.GoogleEnabled)
         return AccountReturnPage(options.Value.AppReturnScheme, false, "not_configured", "Google oturumu yapılandırılmamış.");
 
     var installationId = string.IsNullOrWhiteSpace(state)
@@ -270,7 +283,7 @@ app.MapGet("/api/account/google/callback", async (
             cancellationToken);
         return AccountReturnPage(options.Value.AppReturnScheme, true, exchangeCode, "Giriş tamamlandı. Uygulamaya dönebilirsin.");
     }
-    catch (Exception callbackError) when (callbackError is GoogleOAuthException or HttpRequestException or JsonException or Npgsql.NpgsqlException)
+    catch (Exception callbackError) when (callbackError is GoogleOAuthException or HttpRequestException or JsonException or Npgsql.NpgsqlException or InvalidOperationException)
     {
         app.Logger.LogWarning(callbackError, "Google hesap dönüşü tamamlanamadı");
         return AccountReturnPage(options.Value.AppReturnScheme, false, "exchange_failed", "Google ile giriş tamamlanamadı. Uygulamadan yeniden dene.");
@@ -293,7 +306,91 @@ app.MapPost("/api/account/google/complete", async (
     if (user is null)
         return Results.BadRequest(new { message = "Oturum kodu geçersiz, kullanılmış veya süresi dolmuş." });
     var issued = tokens.IssueUser(user.Id, installationId);
-    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), cancellationToken);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, cancellationToken);
+    response.Headers.CacheControl = "no-store";
+    return Results.Ok(new
+    {
+        accessToken = issued.AccessToken,
+        expiresAt = issued.ExpiresAt,
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        usage
+    });
+}).RequireRateLimiting("account-auth");
+
+app.MapPost("/api/account/email/start", async (
+    EmailSignInStartRequest request,
+    HttpContext context,
+    HttpResponse response,
+    AccountStore accounts,
+    EmailOtpSender emailSender,
+    CancellationToken cancellationToken) =>
+{
+    if (!emailSender.IsEnabled)
+        return Results.Json(new { code = "email_auth_unavailable", message = "E-posta ile giriş henüz kullanıma hazır değil." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    if (!accounts.IsPersistent)
+        return Results.Json(new { code = "account_store_unavailable", message = "Hesap servisine şu anda ulaşılamıyor." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    var email = AccountStore.NormalizeEmail(request.Email);
+    if (email is null)
+        return Results.BadRequest(new { code = "invalid_email", message = "Geçerli bir e-posta adresi yaz." });
+
+    var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+    var installationId = InstallationId(context);
+    var challenge = await accounts.CreateEmailChallengeAsync(
+        email,
+        installationId,
+        code,
+        emailSender.CodeLifetime,
+        emailSender.ResendCooldown,
+        cancellationToken);
+    if (challenge == EmailChallengeStatus.Throttled)
+    {
+        response.Headers.RetryAfter = Math.Ceiling(emailSender.ResendCooldown.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        return Results.Json(new { code = "email_code_throttled", message = "Yeni kod istemeden önce kısa bir süre bekle." }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
+    if (challenge != EmailChallengeStatus.Created)
+        return Results.Json(new { code = "account_store_unavailable", message = "Giriş kodu şu anda oluşturulamıyor." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    try
+    {
+        await emailSender.SendCodeAsync(email, code, request.Language ?? "tr", cancellationToken);
+    }
+    catch (Exception error) when (error is EmailOtpException or HttpRequestException or TaskCanceledException)
+    {
+        await accounts.DeleteEmailChallengeAsync(email, installationId, CancellationToken.None);
+        app.Logger.LogWarning(error, "E-posta giriş kodu gönderilemedi");
+        return Results.Json(new { code = "email_delivery_failed", message = "Giriş kodu gönderilemedi. Biraz sonra yeniden dene." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    response.Headers.CacheControl = "no-store";
+    return Results.Ok(new
+    {
+        code = "email_code_sent",
+        message = "Altı haneli giriş kodu e-posta adresine gönderildi.",
+        expiresInSeconds = (int)emailSender.CodeLifetime.TotalSeconds
+    });
+}).RequireRateLimiting("account-auth");
+
+app.MapPost("/api/account/email/complete", async (
+    EmailSignInCompleteRequest request,
+    HttpContext context,
+    HttpResponse response,
+    AccountStore accounts,
+    EmailOtpSender emailSender,
+    InstallationTokenService tokens,
+    PersistentUsageQuotaService quota,
+    CancellationToken cancellationToken) =>
+{
+    var email = AccountStore.NormalizeEmail(request.Email);
+    var code = request.Code?.Trim() ?? string.Empty;
+    if (email is null || code.Length != 6 || code.Any(character => !char.IsAsciiDigit(character)))
+        return Results.BadRequest(new { code = "invalid_email_code", message = "E-posta adresini ve altı haneli kodu kontrol et." });
+    var installationId = InstallationId(context);
+    if (!await accounts.ConsumeEmailChallengeAsync(email, installationId, code, emailSender.MaximumAttempts, cancellationToken))
+        return Results.BadRequest(new { code = "invalid_email_code", message = "Kod geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsin." });
+
+    var user = await accounts.UpsertEmailUserAsync(email, cancellationToken);
+    var issued = tokens.IssueUser(user.Id, installationId);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
@@ -314,7 +411,7 @@ app.MapGet("/api/account/me", async (
     var userId = UserId(context);
     var user = await accounts.GetUserAsync(userId, cancellationToken);
     if (user is null) return Results.NotFound(new { message = "Kullanıcı hesabı bulunamadı." });
-    var usage = await quota.GetSnapshotAsync(userId.ToString(), cancellationToken);
+    var usage = await quota.GetSnapshotAsync(userId.ToString(), InstallationId(context), cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
@@ -343,6 +440,7 @@ app.MapPost("/api/analyze", async (
 
     var form = await request.ReadFormAsync(cancellationToken);
     var category = form["category"].ToString();
+    var language = form["language"].ToString().Equals("en", StringComparison.OrdinalIgnoreCase) ? "en" : "tr";
     var photo = form.Files.GetFile("photo");
     if (!Categories.All.Contains(category))
         return Results.BadRequest(new { message = "Kategori top, bottom veya shoes olmalı." });
@@ -357,26 +455,29 @@ app.MapPost("/api/analyze", async (
 
     try
     {
-        var usageSubject = UsageSubject(request.HttpContext);
+        var usageSubjects = UsageSubjects(request.HttpContext);
         var quotaDecision = await quota.TryConsumeAsync(
-            usageSubject,
+            usageSubjects.Primary,
+            usageSubjects.Secondary,
             AiOperation.Analysis,
             cancellationToken);
         if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
 
         await using var stream = photo.OpenReadStream();
-        var result = await ai.AnalyzeAsync(stream, contentType, category, cancellationToken);
+        var result = await ai.AnalyzeAsync(stream, contentType, category, language, cancellationToken);
         return Results.Ok(result);
     }
     catch (AiServiceException error)
     {
-        await quota.RefundAsync(UsageSubject(request.HttpContext), AiOperation.Analysis, CancellationToken.None);
+        var usageSubjects = UsageSubjects(request.HttpContext);
+        await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Analysis, CancellationToken.None);
         app.Logger.LogWarning(error, "Kıyafet analizi başarısız");
         return Results.Json(new { message = error.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (InvalidImageException error)
     {
-        await quota.RefundAsync(UsageSubject(request.HttpContext), AiOperation.Analysis, CancellationToken.None);
+        var usageSubjects = UsageSubjects(request.HttpContext);
+        await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Analysis, CancellationToken.None);
         return Results.BadRequest(new { message = error.Message });
     }
 }).RequireRateLimiting("ai");
@@ -401,14 +502,16 @@ app.MapPost("/api/outfits", async (
     if (missing.Count > 0)
         return Results.BadRequest(new { code = "missing_category", missingCategories = missing, message = "Kombin için her ana kategoriden en az bir parça gerekli." });
 
-    var usageSubject = UsageSubject(context);
+    var usageSubjects = UsageSubjects(context);
     var quotaDecision = await quota.TryConsumeAsync(
-        usageSubject,
+        usageSubjects.Primary,
+        usageSubjects.Secondary,
         AiOperation.Outfit,
         cancellationToken);
     if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
 
     var target = Math.Min(3, OutfitRules.PossibleCount(request.Wardrobe));
+    var english = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase);
     var collected = new List<OutfitSuggestion>();
     string? warning = null;
     var aiResponded = false;
@@ -423,18 +526,23 @@ app.MapPost("/api/outfits", async (
         catch (AiServiceException error)
         {
             app.Logger.LogWarning(error, "Kombin AI denemesi {Attempt} başarısız", attempt + 1);
-            warning = "AI servisine ulaşılamadığı için yerel kurallar kullanıldı.";
+            warning = english
+                ? "The smart suggestion service was unavailable, so local rules were used."
+                : "Akıllı öneri servisine ulaşılamadığı için yerel kurallar kullanıldı.";
             break;
         }
     }
 
     if (!aiResponded && warning is not null)
-        await quota.RefundAsync(usageSubject, AiOperation.Outfit, CancellationToken.None);
+        await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
 
     var validAi = OutfitRules.ValidateAi(request.Wardrobe, collected);
     var completed = OutfitRules.Complete(request, validAi);
     var usedFallback = completed.Count > validAi.Take(target).Count();
-    if (usedFallback && warning is null) warning = "Eksik veya geçersiz AI sonuçları yerel kurallarla tamamlandı.";
+    if (usedFallback && warning is null)
+        warning = english
+            ? "Missing or invalid smart suggestions were completed with local rules."
+            : "Eksik veya geçersiz akıllı öneriler yerel kurallarla tamamlandı.";
     return Results.Ok(new OutfitResponse(completed, usedFallback, warning));
 }).RequireRateLimiting("ai");
 
@@ -449,9 +557,13 @@ static Guid UserId(HttpContext context) =>
         ? userId
         : throw new InvalidOperationException("Kullanıcı oturumu doğrulanmadı.");
 
-static string UsageSubject(HttpContext context) =>
-    context.Items[InstallationTokenService.UserContextItemKey]?.ToString()
-    ?? InstallationId(context);
+static (string Primary, string? Secondary) UsageSubjects(HttpContext context)
+{
+    var installationId = InstallationId(context);
+    return context.Items[InstallationTokenService.UserContextItemKey] is Guid userId && userId != Guid.Empty
+        ? (userId.ToString(), installationId)
+        : (installationId, null);
+}
 
 static IResult AccountReturnPage(string configuredScheme, bool success, string value, string message)
 {

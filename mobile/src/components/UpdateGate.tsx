@@ -13,6 +13,7 @@ import {
 import type { MobileVersionInfo, VersionDecision } from '../domain/version';
 import { downloadApk, isDirectApkInstallAvailable, launchApkInstaller } from '../services/apkUpdate';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 type UpdatePhase = 'idle' | 'downloading' | 'permission' | 'installer' | 'error';
 
@@ -35,6 +36,8 @@ export function UpdateGate({
   dismissed,
   onDismiss,
 }: UpdateGateProps) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const [phase, setPhase] = useState<UpdatePhase>('idle');
   const [fraction, setFraction] = useState<number | null>(0);
   const [downloadedBytes, setDownloadedBytes] = useState(0);
@@ -59,10 +62,10 @@ export function UpdateGate({
         leftForPermissionRef.current = AppState.currentState !== 'active';
       }
     } catch (installError) {
-      setError(installError instanceof Error ? installError.message : 'Kurulum ekranı açılamadı.');
+      setError(installError instanceof Error ? installError.message : l('Kurulum ekranı açılamadı.', 'Could not open the installer.'));
       setPhase('error');
     }
-  }, []);
+  }, [language]);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -100,7 +103,7 @@ export function UpdateGate({
       try {
         await Linking.openURL(info.androidDownloadUrl);
       } catch {
-        setError('Güncelleme bağlantısı açılamadı. İnternet bağlantını kontrol edip yeniden dene.');
+        setError(l('Güncelleme bağlantısı açılamadı. İnternet bağlantını kontrol edip yeniden dene.', 'Could not open the update link. Check your connection and try again.'));
         setPhase('error');
       }
       return;
@@ -116,12 +119,12 @@ export function UpdateGate({
         setFraction(progress.fraction);
         setDownloadedBytes(progress.bytesWritten);
         setTotalBytes(progress.totalBytes);
-      });
+      }, language);
       contentUriRef.current = contentUri;
       setFraction(1);
       await openInstaller(contentUri, true);
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : 'Güncelleme indirilemedi.');
+      setError(downloadError instanceof Error ? downloadError.message : l('Güncelleme indirilemedi.', 'Could not download the update.'));
       setPhase('error');
     }
   };
@@ -136,8 +139,8 @@ export function UpdateGate({
   const progressLabel = totalBytes
     ? `${formatMegabytes(downloadedBytes)} / ${formatMegabytes(totalBytes)}`
     : downloadedBytes > 0
-      ? `${formatMegabytes(downloadedBytes)} indirildi`
-      : 'İndirme hazırlanıyor…';
+      ? l(`${formatMegabytes(downloadedBytes)} indirildi`, `${formatMegabytes(downloadedBytes)} downloaded`)
+      : l('İndirme hazırlanıyor…', 'Preparing download…');
 
   return (
     <Modal
@@ -150,14 +153,14 @@ export function UpdateGate({
     >
       <View style={styles.overlay}>
         <View accessibilityViewIsModal style={styles.card}>
-          <Text style={styles.eyebrow}>YENİ SÜRÜM</Text>
+          <Text style={styles.eyebrow}>{t('update.eyebrow')}</Text>
           <Text style={styles.title}>
-            {decision.updateRequired ? 'Güncelleme gerekli' : 'Yeni sürüm hazır'}
+            {decision.updateRequired ? t('update.required') : t('update.ready')}
           </Text>
 
           {phase === 'downloading' ? (
             <>
-              <Text style={styles.body}>Güncelleme uygulamadan çıkmadan indiriliyor.</Text>
+              <Text style={styles.body}>{l('Güncelleme uygulamadan çıkmadan indiriliyor.', 'The update is downloading without leaving the app.')}</Text>
               <View
                 accessibilityRole="progressbar"
                 accessibilityValue={{ min: 0, max: 100, now: Math.round((fraction ?? 0) * 100) }}
@@ -177,36 +180,34 @@ export function UpdateGate({
           ) : phase === 'permission' ? (
             <>
               <Text style={styles.body}>
-                Android, ilk uygulama içi güncellemede bu kaynaktan kuruluma izin vermeni ister.
-                İzni açıp geri döndüğünde kurulum otomatik devam eder.
+                {l('Android, ilk uygulama içi güncellemede bu kaynaktan kuruluma izin vermeni ister. İzni açıp geri döndüğünde kurulum otomatik devam eder.', 'Android asks you to allow installation from this source the first time. Return after enabling it and installation will continue automatically.')}
               </Text>
               <Pressable style={styles.primaryButton} onPress={retryInstaller}>
-                <Text style={styles.primaryLabel}>İzin ekranını yeniden aç</Text>
+                <Text style={styles.primaryLabel}>{l('İzin ekranını yeniden aç', 'Open permission screen again')}</Text>
               </Pressable>
             </>
           ) : phase === 'installer' ? (
             <>
               <Text style={styles.body}>
-                Güncelleme indirildi. Android kurulum ekranında “Güncelle” seçeneğine dokunarak işlemi tamamla.
+                {l('Güncelleme indirildi. Android kurulum ekranında “Güncelle” seçeneğine dokunarak işlemi tamamla.', 'The update is downloaded. Tap “Update” on the Android installer screen to finish.')}
               </Text>
               <Pressable style={styles.primaryButton} onPress={retryInstaller}>
-                <Text style={styles.primaryLabel}>Kurulum ekranını aç</Text>
+                <Text style={styles.primaryLabel}>{l('Kurulum ekranını aç', 'Open installer')}</Text>
               </Pressable>
             </>
           ) : phase === 'error' ? (
             <>
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error ?? 'Güncelleme tamamlanamadı.'}</Text>
+                <Text style={styles.errorText}>{error ?? l('Güncelleme tamamlanamadı.', 'The update could not be completed.')}</Text>
               </View>
               <Pressable style={styles.primaryButton} onPress={() => void startUpdate()}>
-                <Text style={styles.primaryLabel}>Yeniden dene</Text>
+                <Text style={styles.primaryLabel}>{t('common.retry')}</Text>
               </Pressable>
             </>
           ) : (
             <>
               <Text style={styles.body}>
-                Sürüm {info.latestVersion} hazır. Güncelleme indirildikten sonra Android yalnızca kurulum onayını isteyecek;
-                dolabın ve fotoğrafların korunacak.
+                {l(`Sürüm ${info.latestVersion} hazır. İndirme bitince Android yalnızca kurulum onayını isteyecek; dolabın ve fotoğrafların korunacak.`, `Version ${info.latestVersion} is ready. Android will only request installation approval after download; your wardrobe and photos will be preserved.`)}
               </Text>
               <Pressable
                 disabled={canInstallDirectly === null}
@@ -214,7 +215,7 @@ export function UpdateGate({
                 onPress={() => void startUpdate()}
               >
                 <Text style={styles.primaryLabel}>
-                  {canInstallDirectly === null ? 'Hazırlanıyor…' : canInstallDirectly ? 'Güncelle' : 'Güncellemeyi aç'}
+                  {canInstallDirectly === null ? t('update.preparing') : canInstallDirectly ? t('update.download') : t('update.open')}
                 </Text>
               </Pressable>
             </>
@@ -222,10 +223,10 @@ export function UpdateGate({
 
           {closeAllowed ? (
             <Pressable style={styles.secondaryButton} onPress={onDismiss}>
-              <Text style={styles.secondaryLabel}>Daha sonra</Text>
+              <Text style={styles.secondaryLabel}>{t('common.later')}</Text>
             </Pressable>
           ) : null}
-          <Text style={styles.versionText}>Yüklü sürüm {currentVersion}</Text>
+          <Text style={styles.versionText}>{t('update.installed', { version: currentVersion })}</Text>
         </View>
       </View>
     </Modal>

@@ -62,3 +62,12 @@ export function deleteAllStoredImages(): void {
   if (root.exists) root.delete();
 }
 
+export function imageContentHash(uri: string): string | null {
+  try {
+    const file = new File(uri);
+    return file.exists ? file.md5 : null;
+  } catch {
+    return null;
+  }
+}
+

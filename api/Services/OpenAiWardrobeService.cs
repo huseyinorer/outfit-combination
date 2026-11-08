@@ -10,21 +10,13 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
 {
     private readonly OpenAiOptions _options = options.Value;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private const string AnalysisInstructions = """
-        Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Tüm serbest metinleri Türkçe yaz.
-        Fotoğrafta bir kıyafet varsa name alanını mutlaka doldur: 2-5 kelimelik kısa ve ayırt edici bir ad üret.
-        Kısa ad mümkünse "ana renk + belirgin desen + alt tür" sırasını izlesin; örnek: "Lacivert çizgili gömlek", "Siyah deri sneaker".
-        Name alanına cümle, marka tahmini veya açıklama yazma. Yalnızca açıkça görülen özellikleri kullan.
-        Name dışındaki tahmin edilemeyen metin alanlarını boş string ve listeleri boş dizi bırak.
-        detectedCategory yalnız top, bottom, shoes veya boş string olabilir.
-        """;
-
     public int MaxAttempts => Math.Clamp(_options.MaxAttempts, 1, 3);
 
     public async Task<ClothingAnalysis> AnalyzeAsync(
         Stream image,
         string contentType,
         string selectedCategory,
+        string language,
         CancellationToken cancellationToken)
     {
         using var memory = new MemoryStream();
@@ -39,7 +31,9 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         {
             model = _options.Model,
             store = false,
-            instructions = AnalysisInstructions,
+            instructions = language == "en"
+                ? "Analyze one clothing photo for a wardrobe app. Write all free text in English. If clothing is visible, always provide a short distinctive 2-5 word name, preferably primary color + visible pattern + subtype. Do not guess brands. Leave unknown fields empty. detectedCategory must be top, bottom, shoes, or an empty string."
+                : "Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Tüm serbest metinleri Türkçe yaz. Fotoğrafta kıyafet varsa 2-5 kelimelik kısa ve ayırt edici bir name üret; mümkünse ana renk + belirgin desen + alt tür sırasını kullan. Marka tahmini yapma. Bilinmeyen alanları boş bırak. detectedCategory yalnız top, bottom, shoes veya boş string olabilir.",
             input = new object[]
             {
                 new
@@ -47,7 +41,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
                     role = "user",
                     content = new object[]
                     {
-                        new { type = "input_text", text = $"Kullanıcının seçtiği kategori: {selectedCategory}. Kıyafeti analiz et." },
+                        new { type = "input_text", text = language == "en" ? $"Selected category: {selectedCategory}. Analyze the clothing." : $"Kullanıcının seçtiği kategori: {selectedCategory}. Kıyafeti analiz et." },
                         new { type = "input_image", image_url = dataUrl, detail = "high" }
                     }
                 }
@@ -59,7 +53,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
                     type = "json_schema",
                     name = "clothing_analysis",
                     strict = true,
-                    schema = AnalysisSchema()
+                    schema = AnalysisSchema(language)
                 }
             }
         };
@@ -67,7 +61,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         var json = await SendAsync(body, cancellationToken);
         var result = JsonSerializer.Deserialize<ClothingAnalysis>(json, JsonOptions)
             ?? throw new AiServiceException("AI boş analiz döndürdü.");
-        result.Name = EnsureShortName(result, selectedCategory);
+        result.Name = EnsureShortName(result, selectedCategory, language);
         result.DetectedCategory = string.IsNullOrWhiteSpace(result.DetectedCategory) ? null : result.DetectedCategory;
         result.CategoryConflict = result.DetectedCategory is not null &&
             !result.DetectedCategory.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase);
@@ -101,7 +95,9 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         {
             model = _options.Model,
             store = false,
-            instructions = "Türkçe bir kişisel stil asistanısın. Yalnızca verilen kıyafet ID'lerini kullan. Her öneride tam olarak bir top, bir bottom ve bir shoes seç. Aynı üçlüyü tekrarlama. reason tek Türkçe cümle olsun ve seçilen parçaların renk, desen veya tarzına somut biçimde değinsin. Mümkünse görsel olarak farklı üç öneri üret.",
+            instructions = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase)
+                ? "You are a personal style assistant. Use only the supplied clothing IDs. Every suggestion must contain exactly one top, one bottom, and one shoes item. Never repeat a triple. Write title and reason in English. reason must be one concrete sentence about the selected colors, patterns, or style. Prefer three visually distinct suggestions when possible."
+                : "Türkçe bir kişisel stil asistanısın. Yalnızca verilen kıyafet ID'lerini kullan. Her öneride tam olarak bir top, bir bottom ve bir shoes seç. Aynı üçlüyü tekrarlama. title ve reason Türkçe olsun. reason tek cümlede seçilen parçaların renk, desen veya tarzına somut biçimde değinsin. Mümkünse görsel olarak farklı üç öneri üret.",
             input = new object[]
             {
                 new
@@ -189,7 +185,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
             throw new AiServiceException("OpenAI__Model ayarlanmamış.");
     }
 
-    private static object AnalysisSchema() => new
+    private static object AnalysisSchema(string language) => new
     {
         type = "object",
         additionalProperties = false,
@@ -198,7 +194,9 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
             name = new
             {
                 type = "string",
-                description = "Fotoğrafta kıyafet varsa boş olmayan, 2-5 kelimelik Türkçe kısa ad. Örnek: Lacivert çizgili gömlek."
+                description = language == "en"
+                    ? "A non-empty 2-5 word English short name when clothing is visible. Example: Navy striped shirt."
+                    : "Fotoğrafta kıyafet varsa boş olmayan, 2-5 kelimelik Türkçe kısa ad. Örnek: Lacivert çizgili gömlek."
             },
             subType = new { type = "string" },
             primaryColor = new { type = "string" },
@@ -213,7 +211,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
         required = new[] { "name", "subType", "primaryColor", "secondaryColors", "pattern", "styleTags", "seasons", "description", "detectedCategory", "categoryConflict" }
     };
 
-    internal static string EnsureShortName(ClothingAnalysis analysis, string selectedCategory)
+    internal static string EnsureShortName(ClothingAnalysis analysis, string selectedCategory, string language = "tr")
     {
         var supplied = LimitWords(analysis.Name, 5);
         if (!string.IsNullOrWhiteSpace(supplied)) return supplied;
@@ -227,7 +225,13 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
 
         if (parts.Count == 0)
         {
-            parts.Add(selectedCategory switch
+            parts.Add(language == "en" ? selectedCategory switch
+            {
+                Categories.Top => "Top",
+                Categories.Bottom => "Bottom",
+                Categories.Shoes => "Shoes",
+                _ => "Clothing"
+            } : selectedCategory switch
             {
                 Categories.Top => "Üst parça",
                 Categories.Bottom => "Alt parça",

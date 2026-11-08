@@ -2,20 +2,25 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ContentFrame } from '../components/layout';
 import { PrimaryButton, SecondaryButton } from '../components/ui';
 import { colors, radius, spacing } from '../theme/theme';
-
-const steps = [
-  ['1', 'Dolabını oluştur', 'Kameradan veya galeriden kendi kıyafetlerini ekle. Galeriden aynı kategoride 20 fotoğrafa kadar kuyruk oluşturabilirsin.'],
-  ['2', 'Kontrol sende', 'Asıl fotoğrafların cihazında kalır. Otomatik tanımayı kullanmadan önce ne paylaşılacağını görür ve açıkça karar verirsin.'],
-  ['3', 'Gerçek parçalarla kombin', 'En az bir üst, alt ve ayakkabı eklediğinde kendi dolabından farklı kombinler hazırlanır. İnternet olmasa bile temel öneriler cihazında çalışır.'],
-] as const;
+import { useI18n } from '../locales';
 
 export function OnboardingScreen({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
+  const { language, t } = useI18n();
+  const steps = language === 'tr' ? [
+    ['1', 'Dolabını oluştur', 'Kameradan veya galeriden kendi kıyafetlerini ekle. Aynı kategoride 20 fotoğrafa kadar kuyruk oluşturabilirsin.'],
+    ['2', 'Kontrol sende', 'Asıl fotoğrafların cihazında kalır. Akıllı tanımadan önce ne paylaşılacağını görür ve açıkça karar verirsin.'],
+    ['3', 'Gerçek parçalarla kombin', 'En az bir üst, alt ve ayakkabı eklediğinde kendi dolabından farklı kombinler hazırlanır. Temel öneriler çevrimdışı da çalışır.'],
+  ] : [
+    ['1', 'Build your wardrobe', 'Add your own clothing from the camera or gallery. Queue up to 20 photos in the same category.'],
+    ['2', 'You stay in control', 'Original photos stay on your device. Before smart recognition, you see what will be shared and make an explicit choice.'],
+    ['3', 'Outfits using real items', 'After adding at least one top, bottom, and pair of shoes, the app creates different outfits from what you own. Basic suggestions also work offline.'],
+  ];
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scroll}>
       <ContentFrame maxWidth={760} style={styles.content}>
         <Text style={styles.eyebrow}>OUTFIT COMBINATION</Text>
-        <Text style={styles.title}>Dolabın, kararların, kombinlerin.</Text>
-        <Text style={styles.lead}>Üç adımda başlayabilirsin.</Text>
+        <Text style={styles.title}>{t('onboarding.title')}</Text>
+        <Text style={styles.lead}>{t('onboarding.subtitle')}</Text>
         {steps.map(([number, title, body]) => (
           <View key={number} style={styles.card}>
             <Text style={styles.number}>{number}</Text>
@@ -25,8 +30,8 @@ export function OnboardingScreen({ onStart, onSkip }: { onStart: () => void; onS
             </View>
           </View>
         ))}
-        <PrimaryButton title="İlk kıyafetimi ekle" onPress={onStart} />
-        <SecondaryButton title="Şimdilik ana sayfaya geç" onPress={onSkip} />
+        <PrimaryButton title={t('onboarding.start')} onPress={onStart} />
+        <SecondaryButton title={t('onboarding.skip')} onPress={onSkip} />
       </ContentFrame>
     </ScrollView>
   );

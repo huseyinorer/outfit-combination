@@ -8,13 +8,15 @@ public sealed class AccountAuthOptions
     public string AppReturnScheme { get; set; } = "outfitcombination";
     public int AttemptLifetimeMinutes { get; set; } = 10;
 
-    public bool Enabled =>
+    public bool GoogleEnabled =>
         !string.IsNullOrWhiteSpace(GoogleClientId)
         && !string.IsNullOrWhiteSpace(GoogleClientSecret)
         && Uri.TryCreate(CallbackUrl, UriKind.Absolute, out _);
 
+    public bool Enabled => GoogleEnabled;
+
     public bool PartiallyConfigured =>
-        !Enabled
+        !GoogleEnabled
         && (!string.IsNullOrWhiteSpace(GoogleClientId)
             || !string.IsNullOrWhiteSpace(GoogleClientSecret)
             || !string.IsNullOrWhiteSpace(CallbackUrl));

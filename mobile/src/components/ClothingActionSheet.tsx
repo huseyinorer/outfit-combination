@@ -1,6 +1,7 @@
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { CATEGORY_LABELS, type ClothingItem } from '../domain/types';
+import { type ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
+import { useI18n } from '../locales';
 
 export function ClothingActionSheet({
   item,
@@ -13,6 +14,9 @@ export function ClothingActionSheet({
   onEdit: (item: ClothingItem) => void;
   onDelete: (item: ClothingItem) => void;
 }) {
+  const { language, t } = useI18n();
+  const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
+  const categoryLabel = (category: ClothingItem['category']) => t(`category.${category}` as 'category.top' | 'category.bottom' | 'category.shoes');
   return (
     <Modal
       animationType="fade"
@@ -23,7 +27,7 @@ export function ClothingActionSheet({
     >
       <View style={styles.overlay}>
         <Pressable
-          accessibilityLabel="Kıyafet menüsünü kapat"
+          accessibilityLabel={l('Kıyafet menüsünü kapat', 'Close clothing menu')}
           accessibilityRole="button"
           onPress={onClose}
           style={StyleSheet.absoluteFill}
@@ -39,10 +43,10 @@ export function ClothingActionSheet({
               />
               <View style={styles.itemCopy}>
                 <Text numberOfLines={1} style={styles.itemName}>
-                  {item.name || CATEGORY_LABELS[item.category]}
+                  {item.name || categoryLabel(item.category)}
                 </Text>
                 <Text numberOfLines={1} style={styles.itemMeta}>
-                  {[CATEGORY_LABELS[item.category], item.primaryColor, item.subType].filter(Boolean).join(' · ')}
+                  {[categoryLabel(item.category), item.primaryColor, item.subType].filter(Boolean).join(' · ')}
                 </Text>
               </View>
             </View>
@@ -57,8 +61,8 @@ export function ClothingActionSheet({
             >
               <View style={styles.editIcon}><View style={styles.editIconLine} /></View>
               <View style={styles.actionCopy}>
-                <Text style={styles.actionTitle}>Düzenle</Text>
-                <Text style={styles.actionText}>Kıyafet bilgilerini ve özelliklerini güncelle</Text>
+                <Text style={styles.actionTitle}>{t('common.edit')}</Text>
+                <Text style={styles.actionText}>{l('Kıyafet bilgilerini ve özelliklerini güncelle', 'Update clothing details and attributes')}</Text>
               </View>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
@@ -76,8 +80,8 @@ export function ClothingActionSheet({
                 <View style={styles.deleteBin} />
               </View>
               <View style={styles.actionCopy}>
-                <Text style={styles.deleteTitle}>Dolaptan kaldır</Text>
-                <Text style={styles.deleteText}>8 saniye içinde geri alabilirsin</Text>
+                <Text style={styles.deleteTitle}>{l('Dolaptan kaldır', 'Remove from wardrobe')}</Text>
+                <Text style={styles.deleteText}>{l('8 saniye içinde geri alabilirsin', 'You can undo within 8 seconds')}</Text>
               </View>
             </Pressable>
 
@@ -86,7 +90,7 @@ export function ClothingActionSheet({
               onPress={onClose}
               style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}
             >
-              <Text style={styles.cancelText}>Vazgeç</Text>
+              <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </Pressable>
           </View>
         ) : null}
