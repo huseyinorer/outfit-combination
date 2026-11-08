@@ -4,6 +4,7 @@ mobile/.expo/
 mobile/dist/
 mobile/web-build/
 mobile/.git-empty-backup/
+**/.gradle/
 
 # .NET
 api/bin/

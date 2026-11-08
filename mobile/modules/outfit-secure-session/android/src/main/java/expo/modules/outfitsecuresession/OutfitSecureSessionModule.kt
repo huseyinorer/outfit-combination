@@ -30,7 +30,7 @@ class OutfitSecureSessionModule : Module() {
         .commit()) { "Secure session could not be saved" }
     }
 
-    AsyncFunction<String?>("getItem") { key: String ->
+    AsyncFunction("getItem") { key: String ->
       requireValidKey(key)
       val ivValue = preferences().getString("${key}_iv", null)
       val encryptedValue = preferences().getString("${key}_data", null)
