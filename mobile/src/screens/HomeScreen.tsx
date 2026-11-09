@@ -1,12 +1,13 @@
 import React from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
+import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View, useColorScheme, useWindowDimensions } from 'react-native';
+import { CATEGORIES, type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
 import { ClothingActionSheet } from '../components/ClothingActionSheet';
 import { ClothingCard } from '../components/ClothingCard';
 import { ActionCard } from '../components/ActionCard';
+import { CategoryIcon } from '../components/CategoryIcon';
 import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import type { AccountState } from '../services/accountAuth';
-import { colors, radius, spacing } from '../theme/theme';
+import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
 type Filter = 'all' | Category | 'recent' | 'summer' | 'winter';
@@ -27,16 +28,24 @@ interface Props {
   onHistory: () => void;
   favoriteCount: number;
   account: AccountState;
+  onRefresh?: () => Promise<void>;
 }
 
 export function HomeScreen(props: Props) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const [filter, setFilter] = React.useState<Filter>('all');
   const [search, setSearch] = React.useState('');
   const [menuItem, setMenuItem] = React.useState<ClothingItem | null>(null);
   const [accountBusy, setAccountBusy] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const refresh = React.useCallback(async () => {
+    if (!props.onRefresh) return;
+    setRefreshing(true);
+    try { await props.onRefresh(); } finally { setRefreshing(false); }
+  }, [props.onRefresh]);
   const normalizedSearch = search.trim().toLocaleLowerCase(language === 'tr' ? 'tr-TR' : 'en-US');
   const visible = props.items.filter((item) => {
     const filterMatches = filter === 'all'
@@ -230,12 +239,21 @@ export function HomeScreen(props: Props) {
           style={styles.searchInput}
         />
         <Chip label={t('common.all')} selected={filter === 'all'} onPress={() => setFilter('all')} />
-        {(['top', 'bottom', 'shoes'] as Category[]).map((category) => (
+        {CATEGORIES.map((category) => (
           <Chip
             key={category}
-            label={t(`category.${category}` as 'category.top' | 'category.bottom' | 'category.shoes')}
+            label={t(`category.${category}` as 'category.top' | 'category.bottom' | 'category.shoes' | 'category.hat' | 'category.accessory' | 'category.outerwear')}
             selected={filter === category}
             onPress={() => setFilter(category)}
+            leading={(selected) => (
+              <CategoryIcon
+                category={category}
+                size={16}
+                color={selected
+                  ? (scheme === 'dark' ? darkPalette.onPrimary : lightPalette.onPrimary)
+                  : (scheme === 'dark' ? darkPalette.primary : lightPalette.primary)}
+              />
+            )}
           />
         ))}
         <Chip label={l('Yeni eklenenler', 'Recently added')} selected={filter === 'recent'} onPress={() => setFilter('recent')} />
@@ -252,6 +270,8 @@ export function HomeScreen(props: Props) {
         data={visible}
         numColumns={columns}
         keyExtractor={(item) => item.id}
+        refreshing={refreshing}
+        onRefresh={props.onRefresh ? refresh : undefined}
         renderItem={({ item }) => (
           <ClothingCard
             item={item}
@@ -263,9 +283,24 @@ export function HomeScreen(props: Props) {
         ListHeaderComponent={header}
         ListEmptyComponent={props.items.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>◇</Text>
+            <View style={styles.emptyIconRow}>
+              {(['top', 'bottom', 'shoes', 'hat', 'accessory', 'outerwear'] as Category[]).map((category) => (
+                <View key={category} style={styles.emptyIconBubble}>
+                  <CategoryIcon
+                    category={category}
+                    size={22}
+                    color={scheme === 'dark' ? darkPalette.primary : lightPalette.primary}
+                  />
+                </View>
+              ))}
+            </View>
             <Text style={styles.emptyTitle}>{t('home.emptyTitle')}</Text>
             <Text style={styles.emptyText}>{t('home.emptyText')}</Text>
+            <View style={styles.emptySteps}>
+              <Text style={styles.emptyStep}>{l('1. Fotoğrafını çek', '1. Snap a photo')}</Text>
+              <Text style={styles.emptyStep}>{l('2. AI parçayı tanısın', '2. Let AI tag the piece')}</Text>
+              <Text style={styles.emptyStep}>{l('3. Kombinleri gör', '3. Get outfit ideas')}</Text>
+            </View>
             <PrimaryButton title={t('home.firstItem')} onPress={() => props.onAdd()} />
           </View>
         ) : <Notice>{t('home.filterEmpty')}</Notice>}
@@ -359,6 +394,14 @@ const styles = StyleSheet.create({
   readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   empty: { borderRadius: radius.lg, backgroundColor: colors.surface, padding: spacing.xl, gap: spacing.md, alignItems: 'center' },
   emptyIcon: { color: colors.primary, fontSize: 48 },
-  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },
+  emptyIconRow: { flexDirection: 'row', gap: 8, marginBottom: spacing.xs, flexWrap: 'wrap', justifyContent: 'center' },
+  emptyIconBubble: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   emptyText: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: 'center' },
+  emptySteps: { gap: 4, alignItems: 'flex-start' },
+  emptyStep: { color: colors.text, fontSize: 13, fontWeight: '700', letterSpacing: 0.1 },
 });

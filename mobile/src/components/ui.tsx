@@ -73,9 +73,11 @@ interface ChipProps {
   label: string;
   selected: boolean;
   onPress: () => void;
+  leading?: ReactNode | ((selected: boolean) => ReactNode);
 }
 
-export function Chip({ label, selected, onPress }: ChipProps) {
+export function Chip({ label, selected, onPress, leading }: ChipProps) {
+  const leadingNode = typeof leading === 'function' ? leading(selected) : leading;
   return (
     <Pressable
       accessibilityRole="button"
@@ -83,10 +85,12 @@ export function Chip({ label, selected, onPress }: ChipProps) {
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,
+        leadingNode ? styles.chipWithLeading : null,
         selected && styles.chipSelected,
         pressed && styles.pressed,
       ]}
     >
+      {leadingNode}
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </Pressable>
   );
@@ -184,6 +188,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 15,
   },
+  chipWithLeading: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10 },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { color: colors.text, fontSize: 14, fontWeight: '600' },
   chipTextSelected: { color: colors.onPrimary },
