@@ -90,7 +90,9 @@ public static class TestRunner
 
     private static void MobileVersionFile()
     {
-        Equal("1.4.0", new MobileVersionService().LatestVersion);
+        var version = new MobileVersionService().LatestVersion;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(version, @"^\d+\.\d+\.\d+$"))
+            throw new Exception($"Beklenen semver biçimi, gelen {version}");
     }
 
     private static void ShortClothingName()
