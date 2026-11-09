@@ -253,6 +253,22 @@ export function SettingsScreen(props: Props) {
     </Pressable>
   );
 
+  const segmentedOption = (
+    label: string,
+    selected: boolean,
+    onPress: () => void,
+  ) => (
+    <Pressable
+      key={label}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.segmentedOption, selected && styles.segmentedOptionSelected, pressed && styles.pressed]}
+    >
+      <Text style={[styles.segmentedLabel, selected && styles.segmentedLabelSelected]} numberOfLines={1}>{label}</Text>
+    </Pressable>
+  );
+
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScreenHeader title={t('settings.title')} onBack={props.onBack} />
@@ -263,29 +279,6 @@ export function SettingsScreen(props: Props) {
         keyboardDismissMode="on-drag"
       >
         <ContentFrame maxWidth={760} style={styles.content}>
-          <View style={styles.card}>
-            <Text style={styles.title}>{t('settings.language')}</Text>
-            <Text style={styles.text}>{l('Sistem seçiliyken uygulama telefonunun dilini kullanır.', 'When System is selected, the app follows your phone language.')}</Text>
-            <View accessibilityRole="radiogroup" style={styles.preferenceGrid}>
-              {preferenceOption(l('🌐 Sistem', '🌐 System'), languagePreference === 'system', () => setLanguage('system'))}
-              {preferenceOption(`🇹🇷 ${t('settings.turkish')}`, languagePreference === 'tr', () => setLanguage('tr'))}
-              {preferenceOption(`🇬🇧 ${t('settings.english')}`, languagePreference === 'en', () => setLanguage('en'))}
-            </View>
-          </View>
-          <View style={styles.card}>
-            <Text style={styles.title}>{l('Görünüm', 'Appearance')}</Text>
-            <Text style={styles.text}>
-              {l(
-                `Sistem seçiliyken telefonunu takip eder. Şu anda ${props.colorScheme === 'dark' ? 'koyu' : 'açık'} tema kullanılıyor.`,
-                `System follows your phone. The ${props.colorScheme} theme is currently active.`,
-              )}
-            </Text>
-            <View accessibilityRole="radiogroup" style={styles.preferenceGrid}>
-              {preferenceOption(l('🌗 Sistem', '🌗 System'), props.themePreference === 'system', () => props.onThemeChange('system'))}
-              {preferenceOption(l('☀️ Açık', '☀️ Light'), props.themePreference === 'light', () => props.onThemeChange('light'))}
-              {preferenceOption(l('🌙 Koyu', '🌙 Dark'), props.themePreference === 'dark', () => props.onThemeChange('dark'))}
-            </View>
-          </View>
           <View style={styles.card}>
             <View style={styles.titleRow}>
               <Text style={styles.title}>{l('✦ AI özellikleri', '✦ AI features')}</Text>
@@ -401,6 +394,25 @@ export function SettingsScreen(props: Props) {
           </View>
 
           <View style={styles.card}>
+            <View style={styles.compactPrefRow}>
+              <Text style={styles.compactPrefLabel}>{l('Tema', 'Theme')}</Text>
+              <View accessibilityRole="radiogroup" style={styles.segmented}>
+                {segmentedOption(l('Sistem', 'System'), props.themePreference === 'system', () => props.onThemeChange('system'))}
+                {segmentedOption(l('Açık', 'Light'), props.themePreference === 'light', () => props.onThemeChange('light'))}
+                {segmentedOption(l('Koyu', 'Dark'), props.themePreference === 'dark', () => props.onThemeChange('dark'))}
+              </View>
+            </View>
+            <View style={styles.compactPrefRow}>
+              <Text style={styles.compactPrefLabel}>{l('Dil', 'Language')}</Text>
+              <View accessibilityRole="radiogroup" style={styles.segmented}>
+                {segmentedOption(l('Sistem', 'System'), languagePreference === 'system', () => setLanguage('system'))}
+                {segmentedOption('TR', languagePreference === 'tr', () => setLanguage('tr'))}
+                {segmentedOption('EN', languagePreference === 'en', () => setLanguage('en'))}
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.title}>{l('Uygulama hakkında', 'About the app')}</Text>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>{l('Sürüm', 'Version')}</Text>
@@ -507,6 +519,13 @@ const styles = StyleSheet.create({
   preferenceOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   preferenceLabel: { color: colors.text, fontSize: 14, fontWeight: '800' },
   preferenceLabelSelected: { color: colors.primary },
+  compactPrefRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  compactPrefLabel: { color: colors.muted, fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', width: 54 },
+  segmented: { flex: 1, flexDirection: 'row', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted, overflow: 'hidden' },
+  segmentedOption: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  segmentedOptionSelected: { backgroundColor: colors.primary },
+  segmentedLabel: { color: colors.text, fontSize: 12.5, fontWeight: '800' },
+  segmentedLabelSelected: { color: colors.onPrimary },
   pressed: { opacity: 0.72 },
   internalCard: {
     borderRadius: radius.lg,
