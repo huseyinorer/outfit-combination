@@ -3,6 +3,8 @@ import type { ClothingItem, Category } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
+type OptionalCategory = 'hat' | 'accessory' | 'outerwear';
+
 interface Props {
   top: ClothingItem;
   bottom: ClothingItem;
@@ -11,6 +13,8 @@ interface Props {
   accessory?: ClothingItem;
   outerwear?: ClothingItem;
   onPressItem?: (item: ClothingItem) => void;
+  onRemoveExtra?: (category: OptionalCategory) => void;
+  onSwapExtra?: (category: OptionalCategory) => void;
 }
 
 function BoardPiece({ item, large = false, onPress }: {
@@ -74,7 +78,14 @@ export function OutfitPreview(props: Props) {
       {extras.length > 0 ? (
         <View style={styles.extrasRow}>
           {extras.map((entry) => (
-            <ExtraThumb key={entry.category} item={entry.item} category={entry.category} onPress={props.onPressItem} />
+            <ExtraThumb
+              key={entry.category}
+              item={entry.item}
+              category={entry.category}
+              onPress={props.onPressItem}
+              onRemove={props.onRemoveExtra ? () => props.onRemoveExtra!(entry.category as OptionalCategory) : undefined}
+              onSwap={props.onSwapExtra ? () => props.onSwapExtra!(entry.category as OptionalCategory) : undefined}
+            />
           ))}
         </View>
       ) : null}
@@ -82,7 +93,13 @@ export function OutfitPreview(props: Props) {
   );
 }
 
-function ExtraThumb({ item, category, onPress }: { item: ClothingItem; category: Category; onPress?: (item: ClothingItem) => void }) {
+function ExtraThumb({ item, category, onPress, onRemove, onSwap }: {
+  item: ClothingItem;
+  category: Category;
+  onPress?: (item: ClothingItem) => void;
+  onRemove?: () => void;
+  onSwap?: () => void;
+}) {
   const { language } = useI18n();
   const labels: Record<Category, [string, string]> = {
     top: ['Üst', 'Top'],
@@ -94,27 +111,54 @@ function ExtraThumb({ item, category, onPress }: { item: ClothingItem; category:
   };
   const [tr, en] = labels[category];
   return (
-    <Pressable
-      accessibilityRole="imagebutton"
-      accessibilityLabel={language === 'tr' ? `${tr} · ${item.name || item.subType}` : `${en} · ${item.name || item.subType}`}
-      onPress={() => onPress?.(item)}
-      style={({ pressed }) => [styles.extraThumb, pressed && styles.pressed]}
-    >
-      <Image source={{ uri: item.cutoutUri ?? item.photoUri }} style={styles.extraThumbImage} resizeMode="contain" />
-      <View style={styles.extraThumbMeta}>
-        <Text style={styles.extraThumbTag}>{language === 'tr' ? tr : en}</Text>
-        <Text numberOfLines={1} style={styles.extraThumbName}>{item.name || item.subType}</Text>
-      </View>
-    </Pressable>
+    <View style={styles.extraThumbWrap}>
+      <Pressable
+        accessibilityRole="imagebutton"
+        accessibilityLabel={language === 'tr' ? `${tr} · ${item.name || item.subType}` : `${en} · ${item.name || item.subType}`}
+        onPress={() => onPress?.(item)}
+        style={({ pressed }) => [styles.extraThumb, pressed && styles.pressed]}
+      >
+        <Image source={{ uri: item.cutoutUri ?? item.photoUri }} style={styles.extraThumbImage} resizeMode="contain" />
+        <View style={styles.extraThumbMeta}>
+          <Text style={styles.extraThumbTag}>{language === 'tr' ? tr : en}</Text>
+          <Text numberOfLines={1} style={styles.extraThumbName}>{item.name || item.subType}</Text>
+        </View>
+      </Pressable>
+      {(onRemove || onSwap) ? (
+        <View style={styles.extraThumbActions}>
+          {onSwap ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={language === 'tr' ? `${tr} değiştir` : `Swap ${en}`}
+              onPress={onSwap}
+              hitSlop={8}
+              style={({ pressed }) => [styles.extraThumbAction, pressed && styles.pressed]}
+            >
+              <Text style={styles.extraThumbActionText}>↻</Text>
+            </Pressable>
+          ) : null}
+          {onRemove ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={language === 'tr' ? `${tr} kaldır` : `Remove ${en}`}
+              onPress={onRemove}
+              hitSlop={8}
+              style={({ pressed }) => [styles.extraThumbAction, styles.extraThumbActionDanger, pressed && styles.pressed]}
+            >
+              <Text style={[styles.extraThumbActionText, styles.extraThumbActionTextDanger]}>×</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { gap: spacing.sm },
   extrasRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  extraThumbWrap: { flexGrow: 1, flexBasis: '30%', position: 'relative' },
   extraThumb: {
-    flexGrow: 1,
-    flexBasis: '30%',
     minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
@@ -125,6 +169,16 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.xs,
   },
+  extraThumbActions: { position: 'absolute', top: 4, right: 4, flexDirection: 'row', gap: 4 },
+  extraThumbAction: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  extraThumbActionDanger: { borderColor: colors.danger },
+  extraThumbActionText: { color: colors.text, fontSize: 14, fontWeight: '800', lineHeight: 16 },
+  extraThumbActionTextDanger: { color: colors.danger, fontSize: 16, lineHeight: 16 },
   extraThumbImage: { width: 48, height: 48, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
   extraThumbMeta: { flex: 1, gap: 2 },
   extraThumbTag: { color: colors.primary, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },

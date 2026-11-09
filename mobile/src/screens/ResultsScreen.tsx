@@ -113,6 +113,31 @@ export function ResultsScreen(props: Props) {
     setPinned((current) => current[field] ? { ...current, [field]: alternative.id } : current);
   };
 
+  const extraFieldFor = (category: 'hat' | 'accessory' | 'outerwear'): 'hatId' | 'accessoryId' | 'outerwearId' =>
+    category === 'hat' ? 'hatId' : category === 'accessory' ? 'accessoryId' : 'outerwearId';
+
+  const removeExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear') => {
+    const field = extraFieldFor(category);
+    hapticTick('light');
+    const next = { ...suggestion, [field]: null };
+    setDisplayed((current) => current.map((shown) => shown === suggestion ? next : shown));
+  };
+
+  const swapExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear') => {
+    const field = extraFieldFor(category);
+    const currentId = suggestion[field];
+    const candidates = props.items.filter((entry) => entry.category === category && entry.id !== currentId);
+    if (candidates.length === 0) {
+      tactileSuccess(t('result.noAlternative'));
+      return;
+    }
+    const alternative = candidates[0];
+    if (!alternative) return;
+    hapticTick('select');
+    const next = { ...suggestion, [field]: alternative.id };
+    setDisplayed((current) => current.map((shown) => shown === suggestion ? next : shown));
+  };
+
   const togglePin = (field: 'topId' | 'bottomId' | 'shoeId', id: string) => {
     setPinned((current) => current[field] === id
       ? { ...current, [field]: undefined }
@@ -171,9 +196,16 @@ export function ResultsScreen(props: Props) {
             <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.titleWrap}>
-                <Text style={styles.counter}>
-                  {index + 1} / {displayed.length} · {item.source === 'ai' ? l('✦ AI ile hazırlandı', '✦ Created with AI') : l('⚡ Hızlı Kombin', '⚡ Quick Outfit')}
-                </Text>
+                <View style={styles.counterRow}>
+                  {index === 0 && displayed.length > 1 ? (
+                    <View style={styles.pickBadge}>
+                      <Text style={styles.pickBadgeText}>{l('★ Editörün seçimi', '★ Editor’s pick')}</Text>
+                    </View>
+                  ) : null}
+                  <Text style={styles.counter}>
+                    {index + 1} / {displayed.length} · {item.source === 'ai' ? l('✦ AI', '✦ AI') : l('⚡ Hızlı', '⚡ Quick')}
+                  </Text>
+                </View>
                 <Text style={styles.title}>{item.title}</Text>
               </View>
               <Pressable
@@ -198,6 +230,8 @@ export function ResultsScreen(props: Props) {
                 const idx = pieces.findIndex((p) => p.id === piece.id);
                 setViewerContext({ items: pieces, initialIndex: idx >= 0 ? idx : 0 });
               }}
+              onRemoveExtra={(category) => removeExtra(item, category)}
+              onSwapExtra={(category) => swapExtra(item, category)}
             />
             <Text style={styles.photoHint}>{t('result.enlarge')}</Text>
             <Text style={styles.reason}>{item.reason}</Text>
@@ -285,7 +319,15 @@ const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.md, gap: spacing.md },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   titleWrap: { flex: 1, gap: 3 },
+  counterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   counter: { color: colors.accent, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  pickBadge: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pickBadgeText: { color: colors.onPrimary, fontSize: 10, fontWeight: '900', letterSpacing: 0.6 },
   title: { color: colors.text, fontSize: 23, fontWeight: '900' },
   favoriteButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
   favoriteButtonActive: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
