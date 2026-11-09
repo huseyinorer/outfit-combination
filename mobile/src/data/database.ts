@@ -72,6 +72,9 @@ export async function initializeDatabase(): Promise<void> {
       topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
       bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
       shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       createdAt TEXT NOT NULL,
@@ -105,6 +108,9 @@ export async function initializeDatabase(): Promise<void> {
       topId TEXT NOT NULL,
       bottomId TEXT NOT NULL,
       shoeId TEXT NOT NULL,
+      hatId TEXT NULL,
+      accessoryId TEXT NULL,
+      outerwearId TEXT NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       wornAt TEXT NOT NULL
@@ -118,6 +124,9 @@ export async function initializeDatabase(): Promise<void> {
       topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
       bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
       shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       destination TEXT NOT NULL,
@@ -143,6 +152,13 @@ export async function initializeDatabase(): Promise<void> {
   if (!favoriteColumns.has('ownerId')) await database.execAsync("ALTER TABLE favorite_outfits ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
   const correctionColumns = new Set((await database.getAllAsync<{ name: string }>('PRAGMA table_info(ai_corrections)')).map((column) => column.name));
   if (!correctionColumns.has('ownerId')) await database.execAsync("ALTER TABLE ai_corrections ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
+
+  for (const table of ['favorite_outfits', 'worn_outfits', 'suggestion_history'] as const) {
+    const cols = new Set((await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`)).map((column) => column.name));
+    if (!cols.has('hatId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN hatId TEXT NULL;`);
+    if (!cols.has('accessoryId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN accessoryId TEXT NULL;`);
+    if (!cols.has('outerwearId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN outerwearId TEXT NULL;`);
+  }
 
   await database.execAsync(`
     DROP INDEX IF EXISTS idx_clothing_category;
@@ -387,16 +403,20 @@ export async function saveFavoriteOutfit(suggestion: OutfitSuggestion): Promise<
   const database = await db();
   const id = `${activeOwnerId}|${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`;
   await database.runAsync(
-    `INSERT INTO favorite_outfits(id, ownerId, title, topId, bottomId, shoeId, reason, source, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO favorite_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(topId, bottomId, shoeId) DO UPDATE SET
-       title = excluded.title, reason = excluded.reason, source = excluded.source, ownerId = excluded.ownerId`,
+       title = excluded.title, reason = excluded.reason, source = excluded.source, ownerId = excluded.ownerId,
+       hatId = excluded.hatId, accessoryId = excluded.accessoryId, outerwearId = excluded.outerwearId`,
     id,
     activeOwnerId,
     suggestion.title,
     suggestion.topId,
     suggestion.bottomId,
     suggestion.shoeId,
+    suggestion.hatId ?? null,
+    suggestion.accessoryId ?? null,
+    suggestion.outerwearId ?? null,
     suggestion.reason,
     suggestion.source ?? null,
     new Date().toISOString(),
@@ -573,14 +593,17 @@ export async function listDislikedOutfitKeys(): Promise<Set<string>> {
 export async function markOutfitWorn(suggestion: OutfitSuggestion, wornAt = new Date()): Promise<void> {
   const database = await db();
   await database.runAsync(
-    `INSERT INTO worn_outfits(id, ownerId, title, topId, bottomId, shoeId, reason, source, wornAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO worn_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, wornAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     `${activeOwnerId}|${wornAt.toISOString()}|${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`,
     activeOwnerId,
     suggestion.title,
     suggestion.topId,
     suggestion.bottomId,
     suggestion.shoeId,
+    suggestion.hatId ?? null,
+    suggestion.accessoryId ?? null,
+    suggestion.outerwearId ?? null,
     suggestion.reason,
     suggestion.source ?? null,
     wornAt.toISOString(),
@@ -590,7 +613,7 @@ export async function markOutfitWorn(suggestion: OutfitSuggestion, wornAt = new 
 export async function listWornOutfits(limit = 30): Promise<WornOutfit[]> {
   const database = await db();
   return database.getAllAsync<WornOutfit>(
-    `SELECT id, title, topId, bottomId, shoeId, reason, source, wornAt
+    `SELECT id, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, wornAt
      FROM worn_outfits WHERE ownerId = ? ORDER BY wornAt DESC LIMIT ?`,
     activeOwnerId,
     Math.max(1, Math.min(limit, 200)),
@@ -612,9 +635,9 @@ export async function saveSuggestionHistory(
     for (const [position, suggestion] of suggestions.entries()) {
       await database.runAsync(
         `INSERT INTO suggestion_history(
-          id, batchId, ownerId, title, topId, bottomId, shoeId, reason, source,
+          id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source,
           destination, look, tone, suggestedAt, position
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         `${batchId}|${position}`,
         batchId,
         activeOwnerId,
@@ -622,6 +645,9 @@ export async function saveSuggestionHistory(
         suggestion.topId,
         suggestion.bottomId,
         suggestion.shoeId,
+        suggestion.hatId ?? null,
+        suggestion.accessoryId ?? null,
+        suggestion.outerwearId ?? null,
         suggestion.reason,
         suggestion.source ?? null,
         preferences.destination,
@@ -638,7 +664,7 @@ export async function saveSuggestionHistory(
 export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedOutfitHistoryEntry[]> {
   const database = await db();
   const rows = await database.getAllAsync<SuggestionHistoryRow>(
-    `SELECT id, batchId, title, topId, bottomId, shoeId, reason, source,
+    `SELECT id, batchId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source,
        destination, look, tone, suggestedAt, position
      FROM suggestion_history
      WHERE ownerId = ? AND batchId IN (
