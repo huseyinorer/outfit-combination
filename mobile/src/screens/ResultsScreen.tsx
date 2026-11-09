@@ -28,6 +28,7 @@ import { getOutfitFeedback, markOutfitWorn, setOutfitFeedback } from '../data/da
 import type { OutfitFeedbackValue } from '../domain/types';
 import { useI18n } from '../locales';
 import { tactileSuccess } from '../services/feedback';
+import { hapticTick } from '../services/haptics';
 
 interface Props {
   items: ClothingItem[];
@@ -45,7 +46,7 @@ export function ResultsScreen(props: Props) {
   const { width } = useWindowDimensions();
   const [displayed, setDisplayed] = useState(props.suggestions);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [viewerItem, setViewerItem] = useState<ClothingItem | null>(null);
+  const [viewerContext, setViewerContext] = useState<{ items: ClothingItem[]; initialIndex: number } | null>(null);
   const [seenKeys, setSeenKeys] = useState(() => new Set(props.suggestions.map(outfitKey)));
   const [pinned, setPinned] = useState<Partial<Record<'topId' | 'bottomId' | 'shoeId', string>>>({});
   const [feedback, setFeedback] = useState<Record<string, OutfitFeedbackValue | undefined>>({});
@@ -178,7 +179,7 @@ export function ResultsScreen(props: Props) {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={favorite ? t('result.favoriteRemove') : t('result.favoriteAdd')}
-                onPress={() => void props.onToggleFavorite(item)}
+                onPress={() => { hapticTick(favorite ? 'light' : 'success'); void props.onToggleFavorite(item); }}
                 style={({ pressed }) => [styles.favoriteButton, favorite && styles.favoriteButtonActive, pressed && styles.pressed]}
               >
                 <Text style={[styles.favoriteIcon, favorite && styles.favoriteIconActive]}>{favorite ? '♥' : '♡'}</Text>
@@ -191,7 +192,12 @@ export function ResultsScreen(props: Props) {
               hat={resolved.hat}
               accessory={resolved.accessory}
               outerwear={resolved.outerwear}
-              onPressItem={setViewerItem}
+              onPressItem={(piece) => {
+                const pieces = [resolved.top, resolved.bottom, resolved.shoes, resolved.hat, resolved.accessory, resolved.outerwear]
+                  .filter((p): p is ClothingItem => Boolean(p));
+                const idx = pieces.findIndex((p) => p.id === piece.id);
+                setViewerContext({ items: pieces, initialIndex: idx >= 0 ? idx : 0 });
+              }}
             />
             <Text style={styles.photoHint}>{t('result.enlarge')}</Text>
             <Text style={styles.reason}>{item.reason}</Text>
@@ -261,7 +267,11 @@ export function ResultsScreen(props: Props) {
           <Notice tone="error">{t('result.empty')}</Notice>
         </ContentFrame>
       )}
-      <ImageViewerModal item={viewerItem} onClose={() => setViewerItem(null)} />
+      <ImageViewerModal
+        items={viewerContext?.items ?? []}
+        initialIndex={viewerContext?.initialIndex ?? 0}
+        onClose={() => setViewerContext(null)}
+      />
     </View>
   );
 }

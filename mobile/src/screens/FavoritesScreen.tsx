@@ -18,7 +18,7 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
-  const [viewerItem, setViewerItem] = useState<ClothingItem | null>(null);
+  const [viewerContext, setViewerContext] = useState<{ items: ClothingItem[]; initialIndex: number } | null>(null);
   const wide = width >= 900;
 
   return (
@@ -43,7 +43,12 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
                       hat={resolved.hat}
                       accessory={resolved.accessory}
                       outerwear={resolved.outerwear}
-                      onPressItem={setViewerItem}
+                      onPressItem={(piece) => {
+                        const pieces = [resolved.top, resolved.bottom, resolved.shoes, resolved.hat, resolved.accessory, resolved.outerwear]
+                          .filter((p): p is ClothingItem => Boolean(p));
+                        const idx = pieces.findIndex((p) => p.id === piece.id);
+                        setViewerContext({ items: pieces, initialIndex: idx >= 0 ? idx : 0 });
+                      }}
                     />
                     <Text style={styles.reason}>{favorite.reason}</Text>
                     <SecondaryButton title={t('result.favoriteRemove')} onPress={() => void onToggleFavorite(favorite)} />
@@ -54,7 +59,11 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
           )}
         </ContentFrame>
       </ScrollView>
-      <ImageViewerModal item={viewerItem} onClose={() => setViewerItem(null)} />
+      <ImageViewerModal
+        items={viewerContext?.items ?? []}
+        initialIndex={viewerContext?.initialIndex ?? 0}
+        onClose={() => setViewerContext(null)}
+      />
     </View>
   );
 }
