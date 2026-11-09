@@ -29,6 +29,7 @@ import {
   type ClothingItem,
 } from '../domain/types';
 import { analyzeClothing } from '../services/api';
+import { hapticTick } from '../services/haptics';
 import { createThumbnail, deleteStoredImage, finalizeImage, imageContentHash, prepareSelectedImage } from '../services/imageStorage';
 import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
@@ -75,6 +76,7 @@ export function AddClothingScreen(props: Props) {
   const iconColor = scheme === 'dark' ? darkPalette.primary : lightPalette.primary;
   const [draft, setDraft] = useState<ClothingDraft | null>(props.initialDraft);
   const [queue, setQueue] = useState<ClothingDraft[]>(props.initialQueue);
+  const [batchTotal, setBatchTotal] = useState<number>(props.initialQueue.length > 0 ? props.initialQueue.length + 1 : 0);
   const [category, setCategory] = useState<Category | null>(props.initialDraft?.category ?? props.initialCategory ?? null);
   const [busy, setBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -267,6 +269,7 @@ export function AddClothingScreen(props: Props) {
       setLastSource('gallery');
       await setSetting('last_photo_source', 'gallery');
       setQueue(remaining);
+      setBatchTotal(prepared.length);
       await props.onPersistQueue(remaining);
       await persist(first);
     } catch (error) {
@@ -377,7 +380,7 @@ export function AddClothingScreen(props: Props) {
               {CATEGORIES.map((value) => (
                 <Pressable
                   key={value}
-                  onPress={() => setCategory(value)}
+                  onPress={() => { hapticTick('select'); setCategory(value); }}
                   accessibilityRole="button"
                   accessibilityLabel={categoryLabel(value)}
                   style={({ pressed }) => [styles.categoryCard, pressed && styles.categoryCardPressed]}
@@ -421,7 +424,27 @@ export function AddClothingScreen(props: Props) {
           </>
         ) : draft ? (
           <>
-            {batchRemaining > 1 ? <Notice>{l(`Toplu ekleme kuyruğu: bu parçayla birlikte ${batchRemaining} fotoğraf kaldı.`, `Bulk queue: ${batchRemaining} photos remain including this item.`)}</Notice> : null}
+            {batchRemaining > 1 ? (
+              <View style={styles.batchProgress}>
+                <View style={styles.batchProgressHeader}>
+                  <Text style={styles.batchProgressLabel}>{l('Toplu ekleme', 'Bulk add')}</Text>
+                  <Text style={styles.batchProgressCount}>
+                    {batchTotal > 0 ? `${batchTotal - batchRemaining + 1}/${batchTotal}` : `${batchRemaining}`}
+                  </Text>
+                </View>
+                <View style={styles.batchProgressTrack}>
+                  <View
+                    style={[
+                      styles.batchProgressFill,
+                      { width: batchTotal > 0 ? `${((batchTotal - batchRemaining + 1) / batchTotal) * 100}%` : '0%' },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.batchProgressHint}>
+                  {l('Her parçayı onayladıkça sıradaki fotoğraf gelir.', 'Confirm each item to load the next photo.')}
+                </Text>
+              </View>
+            ) : null}
             {analysisMode === 'undecided' ? (
               <Notice>
                 {l('Fotoğrafın hazır. AI renk, tür ve tarz alanlarını senin için doldurabilir; istersen bilgileri ücretsiz olarak kendin girebilirsin.', 'Your photo is ready. AI can fill in color, type, and style, or you can enter the details yourself for free.')}
@@ -550,6 +573,18 @@ const styles = StyleSheet.create({
   },
   selectedCategoryText: { color: colors.text, fontSize: 22, fontWeight: '900' },
   guideHint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  batchProgress: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    gap: spacing.xs,
+  },
+  batchProgressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  batchProgressLabel: { color: colors.primary, fontSize: 11, fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase' },
+  batchProgressCount: { color: colors.text, fontSize: 15, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  batchProgressTrack: { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' },
+  batchProgressFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 3 },
+  batchProgressHint: { color: colors.muted, fontSize: 11.5, lineHeight: 17 },
   guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.warningSoft, gap: spacing.sm },
   guideTitle: { color: colors.accent, fontSize: 13, fontWeight: '800' },
   guideText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
