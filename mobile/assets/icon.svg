@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#1F2122"/>
+
+  <!-- fedora hat: filled dome with sage ribbon -->
+  <g transform="translate(512, 240)">
+    <ellipse cx="0" cy="40" rx="190" ry="26" fill="#F6F3ED"/>
+    <path d="M -142 40 C -142 -92 -72 -130 0 -130 C 72 -130 142 -92 142 40 Z" fill="#F6F3ED"/>
+    <rect x="-144" y="16" width="288" height="18" fill="#92A999" rx="2"/>
+  </g>
+
+  <!-- hanger -->
+  <g transform="translate(512, 405)" stroke="#F6F3ED" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 0 -42 C 0 -68 22 -82 44 -72"/>
+    <path d="M -210 0 L 0 -42 L 210 0"/>
+  </g>
+
+  <!-- tshirt / top -->
+  <g transform="translate(512, 560)" fill="#F6F3ED">
+    <path d="M -214 -70 L -132 -118 L -74 -70 C -42 -36 42 -36 74 -70 L 132 -118 L 214 -70 L 176 10 L 124 -6 L 124 170 L -124 170 L -124 -6 L -176 10 Z"/>
+  </g>
+
+  <!-- trousers -->
+  <g transform="translate(512, 806)" fill="#F6F3ED">
+    <path d="M -116 -66 L 116 -66 L 128 -10 L 86 128 L 20 128 L 6 10 L -6 10 L -20 128 L -86 128 L -128 -10 Z"/>
+  </g>
+
+  <!-- shoes: sage pills -->
+  <g transform="translate(512, 952)" fill="#92A999">
+    <rect x="-128" y="-16" width="108" height="32" rx="16"/>
+    <rect x="20" y="-16" width="108" height="32" rx="16"/>
+  </g>
+</svg>

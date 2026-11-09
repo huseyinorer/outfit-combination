@@ -22,7 +22,7 @@ const config: ExpoConfig = {
     softwareKeyboardLayoutMode: 'resize',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
-      backgroundColor: '#F7F3EA',
+      backgroundColor: '#1F2122',
     },
   },
   ios: {
