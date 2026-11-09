@@ -1,9 +1,12 @@
 import type {
   Category,
   ClothingItem,
+  OptionalCategory,
   OutfitPreferences,
+  OutfitRequestExtras,
   OutfitSuggestion,
 } from './types.ts';
+import { OPTIONAL_CATEGORIES, REQUIRED_CATEGORIES } from './types.ts';
 
 const NORMAL_COLORS = new Set([
   'siyah',
@@ -44,7 +47,7 @@ export const outfitKey = (suggestion: Pick<OutfitSuggestion, 'topId' | 'bottomId
   `${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`;
 
 export function getMissingCategories(items: ClothingItem[]): Category[] {
-  return (['top', 'bottom', 'shoes'] as Category[]).filter(
+  return (REQUIRED_CATEGORIES as readonly Category[]).filter(
     (category) => !items.some((item) => item.category === category),
   );
 }
@@ -66,13 +69,23 @@ export function validateAiSuggestions(
     const bottom = byId.get(candidate.bottomId);
     const shoes = byId.get(candidate.shoeId);
     const key = outfitKey(candidate);
-    const valid =
+    const requiredOk =
       top?.category === 'top' &&
       bottom?.category === 'bottom' &&
       shoes?.category === 'shoes' &&
       !seen.has(key);
-    if (valid) seen.add(key);
-    return valid;
+    if (!requiredOk) return false;
+
+    const optionalOk = (OPTIONAL_CATEGORIES as readonly OptionalCategory[]).every((category) => {
+      const field = `${category}Id` as 'hatId' | 'accessoryId' | 'outerwearId';
+      const id = candidate[field];
+      if (!id) return true;
+      return byId.get(id)?.category === category;
+    });
+    if (!optionalOk) return false;
+
+    seen.add(key);
+    return true;
   });
 }
 
@@ -109,11 +122,36 @@ function scoreTriple(triple: Omit<Triple, 'score'>, preferences: OutfitPreferenc
   return score;
 }
 
-function makeLocalSuggestion(triple: Triple, english: boolean): OutfitSuggestion {
+function scoreExtra(item: ClothingItem, triple: Triple, preferences: OutfitPreferences): number {
+  let score = colorScore([...[triple.top, triple.bottom, triple.shoes], item], normalize(preferences.tone)) * 0.4;
+  const styles = item.styleTags;
+  const expected = destinationStyles[normalize(preferences.destination)] ?? [];
+  if (includesAny(styles, expected)) score += 1.5;
+  if (!['Fark etmez', 'Any'].includes(preferences.look) && includesAny(styles, [preferences.look])) score += 2;
+  return score;
+}
+
+function pickExtra(
+  pool: ClothingItem[],
+  triple: Triple,
+  preferences: OutfitPreferences,
+  mode: 'auto' | 'include' | 'exclude' | undefined,
+): ClothingItem | null {
+  if (mode === 'exclude') return null;
+  if (pool.length === 0) return mode === 'include' ? null : null;
+  const sorted = [...pool].sort((a, b) => scoreExtra(b, triple, preferences) - scoreExtra(a, triple, preferences));
+  return sorted[0] ?? null;
+}
+
+function makeLocalSuggestion(
+  triple: Triple,
+  english: boolean,
+  extras: { hat: ClothingItem | null; accessory: ClothingItem | null; outerwear: ClothingItem | null },
+): OutfitSuggestion {
   const colors = [triple.top.primaryColor, triple.bottom.primaryColor, triple.shoes.primaryColor]
     .filter(Boolean)
     .join(', ');
-  return {
+  const base: OutfitSuggestion = {
     title: `${triple.top.name || (english ? 'Top' : 'Üst')} & ${triple.bottom.name || (english ? 'Bottom' : 'Alt')}`,
     topId: triple.top.id,
     bottomId: triple.bottom.id,
@@ -123,16 +161,24 @@ function makeLocalSuggestion(triple: Triple, english: boolean): OutfitSuggestion
       : `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`,
     source: 'local',
   };
+  if (extras.hat) base.hatId = extras.hat.id;
+  if (extras.accessory) base.accessoryId = extras.accessory.id;
+  if (extras.outerwear) base.outerwearId = extras.outerwear.id;
+  return base;
 }
 
 export function buildLocalSuggestions(
   items: ClothingItem[],
   preferences: OutfitPreferences,
   excludedKeys = new Set<string>(),
+  extras: OutfitRequestExtras = {},
 ): OutfitSuggestion[] {
   const tops = items.filter((item) => item.category === 'top');
   const bottoms = items.filter((item) => item.category === 'bottom');
   const shoes = items.filter((item) => item.category === 'shoes');
+  const hats = items.filter((item) => item.category === 'hat');
+  const accessories = items.filter((item) => item.category === 'accessory');
+  const outerwear = items.filter((item) => item.category === 'outerwear');
   const triples: Triple[] = [];
 
   for (const top of tops) {
@@ -169,7 +215,11 @@ export function buildLocalSuggestions(
   }
 
   const english = ['Any', 'Daily', 'Work/office', 'Meeting friends', 'Dinner', 'Special occasion'].includes(preferences.destination);
-  return selected.map((triple) => makeLocalSuggestion(triple, english));
+  return selected.map((triple) => makeLocalSuggestion(triple, english, {
+    hat: pickExtra(hats, triple, preferences, extras.hat),
+    accessory: pickExtra(accessories, triple, preferences, extras.accessory),
+    outerwear: pickExtra(outerwear, triple, preferences, extras.outerwear),
+  }));
 }
 
 export function completeSuggestions(
@@ -177,6 +227,7 @@ export function completeSuggestions(
   preferences: OutfitPreferences,
   aiCandidates: OutfitSuggestion[] = [],
   excludedKeys = new Set<string>(),
+  extras: OutfitRequestExtras = {},
 ): OutfitSuggestion[] {
   const possible = countPossibleOutfits(items);
   if (possible === 0) return [];
@@ -188,9 +239,9 @@ export function completeSuggestions(
     .map((suggestion) => ({ ...suggestion, source: 'ai' as const }));
   const seen = new Set(validAi.map(outfitKey));
   const localExcluded = new Set([...excludedKeys, ...seen]);
-  let local = buildLocalSuggestions(items, preferences, localExcluded);
+  let local = buildLocalSuggestions(items, preferences, localExcluded, extras);
   if (validAi.length + local.length < target && excludedKeys.size > 0) {
-    local = [...local, ...buildLocalSuggestions(items, preferences, seen)
+    local = [...local, ...buildLocalSuggestions(items, preferences, seen, extras)
       .filter((suggestion) => !local.some((existing) => outfitKey(existing) === outfitKey(suggestion)))];
   }
   return [...validAi, ...local].slice(0, target);
@@ -202,6 +253,8 @@ export function resolveOutfitItems(items: ClothingItem[], suggestion: OutfitSugg
     top: byId.get(suggestion.topId),
     bottom: byId.get(suggestion.bottomId),
     shoes: byId.get(suggestion.shoeId),
+    hat: suggestion.hatId ? byId.get(suggestion.hatId) : undefined,
+    accessory: suggestion.accessoryId ? byId.get(suggestion.accessoryId) : undefined,
+    outerwear: suggestion.outerwearId ? byId.get(suggestion.outerwearId) : undefined,
   };
 }
-

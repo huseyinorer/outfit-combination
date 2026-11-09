@@ -4,6 +4,7 @@ export const en = {
   'common.back': '‹ Back', 'common.cancel': 'Cancel', 'common.delete': 'Delete', 'common.edit': 'Edit', 'common.save': 'Save',
   'common.retry': 'Try again', 'common.later': 'Later', 'common.unknownError': 'Unknown error', 'common.clothing': 'Clothing', 'common.all': 'All',
   'category.top': 'Top', 'category.bottom': 'Bottom', 'category.shoes': 'Shoes',
+  'category.hat': 'Hat', 'category.accessory': 'Accessory', 'category.outerwear': 'Jacket',
   'auth.eyebrow': 'YOUR PERSONAL WARDROBE', 'auth.title': 'Choose what to wear with less effort.',
   'auth.subtitle': 'Your wardrobe stays on your phone. Your account only protects AI credits and your personal wardrobe.',
   'auth.google': 'Continue with Google', 'auth.email': 'Continue with email', 'auth.emailLabel': 'Email address',

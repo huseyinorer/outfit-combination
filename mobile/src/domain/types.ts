@@ -1,10 +1,17 @@
-export const CATEGORIES = ['top', 'bottom', 'shoes'] as const;
+export const CATEGORIES = ['top', 'bottom', 'shoes', 'hat', 'accessory', 'outerwear'] as const;
 export type Category = (typeof CATEGORIES)[number];
+
+export const REQUIRED_CATEGORIES = ['top', 'bottom', 'shoes'] as const satisfies ReadonlyArray<Category>;
+export const OPTIONAL_CATEGORIES = ['hat', 'accessory', 'outerwear'] as const satisfies ReadonlyArray<Category>;
+export type OptionalCategory = (typeof OPTIONAL_CATEGORIES)[number];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   top: 'Üst',
   bottom: 'Alt',
   shoes: 'Ayakkabı',
+  hat: 'Şapka',
+  accessory: 'Aksesuar',
+  outerwear: 'Mont',
 };
 
 export interface ClothingAttributes {
@@ -53,8 +60,17 @@ export interface OutfitSuggestion {
   topId: string;
   bottomId: string;
   shoeId: string;
+  hatId?: string | null;
+  accessoryId?: string | null;
+  outerwearId?: string | null;
   reason: string;
   source?: 'ai' | 'local';
+}
+
+export interface OutfitRequestExtras {
+  hat?: 'auto' | 'include' | 'exclude';
+  accessory?: 'auto' | 'include' | 'exclude';
+  outerwear?: 'auto' | 'include' | 'exclude';
 }
 
 export interface FavoriteOutfit extends OutfitSuggestion {

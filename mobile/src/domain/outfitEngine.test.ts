@@ -129,3 +129,53 @@ test('beğenilmeyen üçlü alternatif varken yerel öneriden çıkarılır', ()
   assert.equal(suggestions.length, 3);
 });
 
+test('şapka, aksesuar ve mont dolapta varsa yerel öneriye eklenir', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('b1', 'bottom'), item('s1', 'shoes'),
+    item('h1', 'hat'), item('a1', 'accessory'), item('o1', 'outerwear'),
+  ];
+  const [suggestion] = buildLocalSuggestions(wardrobe, preferences);
+  assert.equal(suggestion.hatId, 'h1');
+  assert.equal(suggestion.accessoryId, 'a1');
+  assert.equal(suggestion.outerwearId, 'o1');
+});
+
+test('exclude kipi opsiyonel kategoriyi öneriye katmaz', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('b1', 'bottom'), item('s1', 'shoes'),
+    item('h1', 'hat'),
+  ];
+  const [suggestion] = buildLocalSuggestions(wardrobe, preferences, new Set(), { hat: 'exclude' });
+  assert.equal(suggestion.hatId, undefined);
+});
+
+test('opsiyonel kategoriler eksikse zorunlu 3lü öneri yine çalışır', () => {
+  const wardrobe = [item('t1', 'top'), item('b1', 'bottom'), item('s1', 'shoes')];
+  assert.deepEqual(getMissingCategories(wardrobe), []);
+  const [suggestion] = buildLocalSuggestions(wardrobe, preferences);
+  assert.equal(suggestion.topId, 't1');
+  assert.equal(suggestion.hatId, undefined);
+  assert.equal(suggestion.accessoryId, undefined);
+  assert.equal(suggestion.outerwearId, undefined);
+});
+
+test('AI önerisindeki geçersiz şapka kimliği reddedilir', () => {
+  const wardrobe = [item('t1', 'top'), item('b1', 'bottom'), item('s1', 'shoes'), item('x1', 'accessory')];
+  const bad = { title: 'X', topId: 't1', bottomId: 'b1', shoeId: 's1', hatId: 'x1', reason: '' };
+  assert.equal(validateAiSuggestions(wardrobe, [bad]).length, 0);
+});
+
+test('resolveOutfitItems opsiyonel slotları da döndürür', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('b1', 'bottom'), item('s1', 'shoes'),
+    item('h1', 'hat'), item('a1', 'accessory'), item('o1', 'outerwear'),
+  ];
+  const resolved = resolveOutfitItems(wardrobe, {
+    title: '', topId: 't1', bottomId: 'b1', shoeId: 's1',
+    hatId: 'h1', accessoryId: 'a1', outerwearId: 'o1', reason: '',
+  });
+  assert.equal(resolved.hat?.id, 'h1');
+  assert.equal(resolved.accessory?.id, 'a1');
+  assert.equal(resolved.outerwear?.id, 'o1');
+});
+
