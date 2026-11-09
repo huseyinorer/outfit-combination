@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { completeSuggestions, getMissingCategories } from '../domain/outfitEngine';
@@ -15,7 +15,7 @@ import {
 import { requestOutfits } from '../services/api';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
-import { listDislikedOutfitKeys } from '../data/database';
+import { getSetting, listDislikedOutfitKeys, setSetting } from '../data/database';
 
 interface Props {
   items: ClothingItem[];
@@ -53,7 +53,39 @@ export function RecommendScreen(props: Props) {
     look: any,
     tone: any,
   });
-  const [extras, setExtras] = useState<OutfitRequestExtras>({ hat: 'auto', accessory: 'auto', outerwear: 'auto' });
+  const [extras, setExtrasState] = useState<OutfitRequestExtras>({ hat: 'auto', accessory: 'auto', outerwear: 'auto' });
+
+  const [extrasTipSeen, setExtrasTipSeen] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      const raw = await getSetting('outfit_extras_preference');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Partial<Record<OptionalCategory, 'auto' | 'include' | 'exclude'>>;
+          setExtrasState((current) => ({
+            hat: parsed.hat ?? current.hat ?? 'auto',
+            accessory: parsed.accessory ?? current.accessory ?? 'auto',
+            outerwear: parsed.outerwear ?? current.outerwear ?? 'auto',
+          }));
+        } catch {
+          // malformed setting; ignore and keep defaults
+        }
+      }
+      const tipSeen = await getSetting('extras_tip_seen');
+      setExtrasTipSeen(tipSeen === '1');
+    })();
+  }, []);
+
+  const dismissExtrasTip = () => {
+    setExtrasTipSeen(true);
+    void setSetting('extras_tip_seen', '1');
+  };
+
+  const setExtras = (next: OutfitRequestExtras) => {
+    setExtrasState(next);
+    void setSetting('outfit_extras_preference', JSON.stringify(next));
+  };
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +202,20 @@ export function RecommendScreen(props: Props) {
                   </View>
                 ))}
               </View>
+              {availableExtras.length > 0 && !extrasTipSeen ? (
+                <View style={styles.extrasTooltip}>
+                  <Text style={styles.extrasTooltipTitle}>{l('✨ Ekstralar hazır', '✨ Extras are ready')}</Text>
+                  <Text style={styles.extrasTooltipText}>
+                    {l(
+                      'Şapka, aksesuar ve montun için üç seçeneğin var: AI\'a bırak, hep ekle veya bu kombinde kullanma.',
+                      'For hats, accessories and jackets you have three choices: let AI decide, always include, or skip for this outfit.',
+                    )}
+                  </Text>
+                  <Pressable onPress={dismissExtrasTip} hitSlop={8} accessibilityRole="button">
+                    <Text style={styles.extrasTooltipAction}>{l('Anladım', 'Got it')}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
               {availableExtras.length > 0 ? (
                 <View style={styles.question}>
                   <Text style={styles.number}>0{questions.length + 1}</Text>
@@ -245,6 +291,17 @@ const styles = StyleSheet.create({
   questionsWide: { flexDirection: 'row', alignItems: 'stretch' },
   question: { flex: 1, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.md },
   extrasHint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  extrasTooltip: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+    gap: spacing.xs,
+  },
+  extrasTooltipTitle: { color: colors.primary, fontSize: 14, fontWeight: '900' },
+  extrasTooltipText: { color: colors.text, fontSize: 13, lineHeight: 19 },
+  extrasTooltipAction: { color: colors.primary, fontSize: 13, fontWeight: '800', alignSelf: 'flex-end', paddingTop: 4 },
   extraRow: { gap: spacing.sm, paddingVertical: spacing.xs },
   extraHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
   extraLabel: { color: colors.text, fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
