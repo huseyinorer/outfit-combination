@@ -3,10 +3,12 @@ import { en } from './en';
 import { tr, type TranslationKey } from './tr';
 
 export type AppLanguage = 'tr' | 'en';
+export type AppLanguagePreference = 'system' | AppLanguage;
 
 interface LocalizationValue {
   language: AppLanguage;
-  setLanguage: (language: AppLanguage) => void;
+  languagePreference: AppLanguagePreference;
+  setLanguage: (language: AppLanguagePreference) => void;
   t: (key: TranslationKey, values?: Record<string, string | number>) => string;
 }
 
@@ -34,18 +36,21 @@ export function translate(
 
 export function LocalizationProvider({
   language,
+  languagePreference,
   onLanguageChange,
   children,
 }: {
   language: AppLanguage;
-  onLanguageChange: (language: AppLanguage) => void;
+  languagePreference: AppLanguagePreference;
+  onLanguageChange: (language: AppLanguagePreference) => void;
   children: ReactNode;
 }) {
   const value = useMemo<LocalizationValue>(() => ({
     language,
+    languagePreference,
     setLanguage: onLanguageChange,
     t: (key, values) => translate(language, key, values),
-  }), [language, onLanguageChange]);
+  }), [language, languagePreference, onLanguageChange]);
   return <LocalizationContext.Provider value={value}>{children}</LocalizationContext.Provider>;
 }
 

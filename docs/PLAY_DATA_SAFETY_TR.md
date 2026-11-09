@@ -6,7 +6,7 @@ Bu belge Play Console'a doğrudan yüklenmez. Form doldurulurken mevcut uygulama
 
 - Kullanıcı Google ile giriş yaparsa Google hesap kimliği, doğrulanmış e-posta, görünen ad ve isteğe bağlı profil fotoğrafı URL'si Neon'da saklanır. Parolasız e-posta yolunu kullanırsa doğrulanmış e-posta adresi ve kısa ömürlü kod kaydı işlenir. Parola, Google erişim belirteci veya Google yenileme belirteci saklanmaz.
 - Telefon, kişi listesi, konum, reklam kimliği veya ödeme bilgisi toplanmaz.
-- Kıyafet fotoğrafları, dolap kayıtları, favoriler, kombin geri bildirimi ve giyim geçmişi uygulamanın özel yerel alanında saklanır. Aynı cihazdaki hesaplar ayrı yerel dolaplar görür; bu içerikler hesaba veya Neon'a yüklenmez.
+- Kıyafet fotoğrafları, dolap kayıtları, favoriler, kombin geri bildirimi, kombin öneri geçmişi ve giyim geçmişi uygulamanın özel yerel alanında saklanır. Aynı cihazdaki hesaplar ayrı yerel dolaplar görür; bu içerikler hesaba veya Neon'a yüklenmez.
 - Kullanıcı gerçek AI moduna açıkça onay verirse küçültülmüş kıyafet fotoğrafı analiz amacıyla Render backend ve OpenAI API'ye aktarılır.
 - Kombin önerisinde fotoğraf gönderilmez; tercih, rastgele kıyafet ID'si ve metinsel özellikler gönderilir.
 - Rastgele kurulum UUID'si, rastgele iç hesap UUID'si ve günlük/aylık analiz-kombin kullanım sayıları Neon'da en fazla 13 ay saklanır. Kota hem hesaba hem kuruluma uygulanır; farklı hesapla giriş yapmak cihaz hakkını yenilemez.

@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   progressRow: { minHeight: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   progressText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   progressPercent: { color: colors.primary, fontSize: 13, fontWeight: '900' },
-  errorBox: { borderRadius: radius.sm, padding: spacing.md, backgroundColor: '#F8E2DF' },
+  errorBox: { borderRadius: radius.sm, padding: spacing.md, backgroundColor: colors.dangerSoft },
   errorText: { color: colors.danger, fontSize: 14, lineHeight: 20 },
   primaryButton: {
     minHeight: 52,
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.primary,
   },
-  primaryLabel: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  primaryLabel: { color: colors.onPrimary, fontSize: 16, fontWeight: '900' },
   disabledButton: { opacity: 0.55 },
   secondaryButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryLabel: { color: colors.text, fontSize: 15, fontWeight: '800' },

@@ -321,7 +321,7 @@ export async function completeInitialAccountSignIn(baseUrl: string, language: Ap
 export async function ensureAccountForAi(baseUrl: string, language: AppLanguage = 'tr'): Promise<AccountState> {
   const state = await loadAccountState(baseUrl, language);
   if (!state.enabled || state.user) return state;
-  throw new Error(message(language, 'Akıllı özellikleri kullanmak için hesabına giriş yap.', 'Sign in to use smart features.'));
+  throw new Error(message(language, 'AI özelliklerini kullanmak için hesabına giriş yap.', 'Sign in to use AI features.'));
 }
 
 export async function requestEmailSignInCode(
@@ -399,7 +399,7 @@ export async function accountAuthenticatedFetch(
     return installationAuthenticatedFetch(cleanBaseUrl, path, init, signal, language);
 
   const session = await storedSession(cleanBaseUrl);
-  if (!session) throw new Error(message(language, 'Akıllı özelliği kullanmak için hesabına giriş yap.', 'Sign in to use this smart feature.'));
+  if (!session) throw new Error(message(language, 'Bu AI özelliğini kullanmak için hesabına giriş yap.', 'Sign in to use this AI feature.'));
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${session.accessToken}`);
   const response = await expoFetch(`${cleanBaseUrl}${path}`, { ...init, headers, signal });

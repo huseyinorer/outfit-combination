@@ -12,7 +12,6 @@ const config: ExpoConfig = {
   scheme: 'outfitcombination',
   icon: './assets/icon.png',
   orientation: 'default',
-  userInterfaceStyle: 'light',
   android: {
     package: 'com.krofosyonel.outfitcombination',
     permissions: [
@@ -27,6 +26,7 @@ const config: ExpoConfig = {
     },
   },
   plugins: [
+    './plugins/with-outfit-theme.cjs',
     'expo-updates',
     'expo-sqlite',
     [

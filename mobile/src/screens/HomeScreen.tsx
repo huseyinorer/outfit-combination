@@ -19,6 +19,7 @@ interface Props {
   onOpen: (item: ClothingItem) => void;
   onDelete: (item: ClothingItem) => Promise<void>;
   onResumeDraft: () => void;
+  onCancelDraft: () => Promise<void>;
   onSettings: () => void;
   onSignIn: () => Promise<void>;
   onFavorites: () => void;
@@ -92,6 +93,12 @@ export function HomeScreen(props: Props) {
     });
   };
 
+  const cancelPendingDraft = () => {
+    void props.onCancelDraft().catch((error: unknown) => {
+      Alert.alert(l('İptal edilemedi', 'Could not cancel'), error instanceof Error ? error.message : t('common.unknownError'));
+    });
+  };
+
   const header = (
     <View style={styles.headerContent}>
       <View style={styles.topBar}>
@@ -148,7 +155,7 @@ export function HomeScreen(props: Props) {
         ) : (
           <View style={styles.signInCard}>
             <View style={styles.accountCopy}>
-              <Text style={styles.accountEyebrow}>{l('AKILLI ÖZELLİKLER', 'SMART FEATURES')}</Text>
+              <Text style={styles.accountEyebrow}>{l('✦ AI ÖZELLİKLERİ', '✦ AI FEATURES')}</Text>
               <Text style={styles.accountTitle}>{t('home.guestBannerTitle')}</Text>
               <Text style={styles.accountText}>{t('home.guestBannerText')}</Text>
             </View>
@@ -158,12 +165,23 @@ export function HomeScreen(props: Props) {
       ) : null}
 
       {props.pendingDraft ? (
-        <Pressable onPress={props.onResumeDraft} style={styles.draftCard}>
-          <Text style={styles.draftTitle}>{t('home.pending')}</Text>
-          <Text style={styles.draftText}>
-            {props.pendingQueueCount > 0 ? t('home.pendingQueue', { count: props.pendingQueueCount }) : t('home.pendingText')}
-          </Text>
-        </Pressable>
+        <View style={styles.draftCard}>
+          <Pressable onPress={props.onResumeDraft} style={({ pressed }) => [styles.draftCopy, pressed && styles.pressed]}>
+            <Text style={styles.draftTitle}>{t('home.pending')}</Text>
+            <Text style={styles.draftText}>
+              {props.pendingQueueCount > 0 ? t('home.pendingQueue', { count: props.pendingQueueCount }) : t('home.pendingText')}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('home.cancelPending')}
+            hitSlop={6}
+            onPress={cancelPendingDraft}
+            style={({ pressed }) => [styles.cancelDraftButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.cancelDraftText}>{t('home.cancelPending')}</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       <View style={[styles.readiness, readyForOutfits ? styles.readinessReady : styles.readinessMissing]}>
@@ -181,10 +199,10 @@ export function HomeScreen(props: Props) {
         <Text style={styles.sectionTitle}>{t('home.wardrobe')}</Text>
         <View style={styles.sectionMeta}>
           <Pressable onPress={props.onFavorites} hitSlop={8}>
-            <Text style={styles.favoriteLink}>{t('home.favorites', { count: props.favoriteCount })}</Text>
+            <Text style={styles.favoriteLink}>♡ {t('home.favorites', { count: props.favoriteCount })}</Text>
           </Pressable>
           <Pressable onPress={props.onHistory} hitSlop={8}>
-            <Text style={styles.favoriteLink}>{l('Geçmiş', 'History')}</Text>
+            <Text style={styles.favoriteLink}>{l('◷ Tarihçe', '◷ History')}</Text>
           </Pressable>
           <Text style={styles.count}>{t('home.pieces', { count: props.items.length })}</Text>
         </View>
@@ -290,7 +308,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#BFD2C5',
+    borderColor: colors.successBorder,
     padding: spacing.lg,
     backgroundColor: colors.primarySoft,
   },
@@ -298,20 +316,23 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#D8C3A8',
+    borderColor: colors.warningBorder,
     padding: spacing.lg,
-    backgroundColor: '#F4E9DA',
+    backgroundColor: colors.warningSoft,
   },
   accountCopy: { flex: 1, gap: 5 },
   accountEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
   accountTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
   accountText: { color: colors.muted, fontSize: 13, lineHeight: 19 },
   accountChevron: { color: colors.primary, fontSize: 32, fontWeight: '500' },
-  draftCard: { borderRadius: radius.md, backgroundColor: '#F4E5D4', padding: spacing.md, gap: 4 },
+  draftCard: { minHeight: 76, flexDirection: 'row', alignItems: 'center', borderRadius: radius.md, backgroundColor: colors.warningSoft, padding: spacing.sm, gap: spacing.sm },
+  draftCopy: { flex: 1, alignSelf: 'stretch', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs, gap: 4 },
   draftTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   draftText: { color: colors.muted, fontSize: 13 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  sectionMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  cancelDraftButton: { minWidth: 76, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.sm, backgroundColor: colors.dangerSoft },
+  cancelDraftText: { color: colors.danger, fontSize: 13, fontWeight: '900' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.sm },
+  sectionMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: spacing.sm },
   favoriteLink: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   sectionTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   count: { color: colors.muted, fontSize: 13 },
@@ -319,7 +340,7 @@ const styles = StyleSheet.create({
   searchInput: { width: '100%', minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surface, color: colors.text, fontSize: 15 },
   readiness: { borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   readinessReady: { backgroundColor: colors.primarySoft },
-  readinessMissing: { backgroundColor: '#F4E5D4' },
+  readinessMissing: { backgroundColor: colors.warningSoft },
   readinessCounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   readinessCount: { color: colors.text, fontSize: 14, fontWeight: '800' },
   readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },

@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
   contentWide: { flexDirection: 'row', alignItems: 'flex-start' },
   mediaColumn: { flex: 0.9, minWidth: 280, gap: spacing.sm },
   formColumn: { flex: 1.1, minWidth: 280 },
-  image: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: '#EDE8DE' },
+  image: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: colors.surfaceMuted },
   photoNote: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   deleteAction: { minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' },
   deleteActionText: { color: colors.danger, fontSize: 16, fontWeight: '800' },

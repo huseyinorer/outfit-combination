@@ -8,11 +8,11 @@ export function OnboardingScreen({ onStart, onSkip }: { onStart: () => void; onS
   const { language, t } = useI18n();
   const steps = language === 'tr' ? [
     ['1', 'Dolabını oluştur', 'Kameradan veya galeriden kendi kıyafetlerini ekle. Aynı kategoride 20 fotoğrafa kadar kuyruk oluşturabilirsin.'],
-    ['2', 'Kontrol sende', 'Asıl fotoğrafların cihazında kalır. Akıllı tanımadan önce ne paylaşılacağını görür ve açıkça karar verirsin.'],
+    ['2', 'Kontrol sende', 'Asıl fotoğrafların cihazında kalır. AI analizini yalnızca istediğinde kullanırsın.'],
     ['3', 'Gerçek parçalarla kombin', 'En az bir üst, alt ve ayakkabı eklediğinde kendi dolabından farklı kombinler hazırlanır. Temel öneriler çevrimdışı da çalışır.'],
   ] : [
     ['1', 'Build your wardrobe', 'Add your own clothing from the camera or gallery. Queue up to 20 photos in the same category.'],
-    ['2', 'You stay in control', 'Original photos stay on your device. Before smart recognition, you see what will be shared and make an explicit choice.'],
+    ['2', 'You stay in control', 'Original photos stay on your device. AI analysis runs only when you choose it.'],
     ['3', 'Outfits using real items', 'After adding at least one top, bottom, and pair of shoes, the app creates different outfits from what you own. Basic suggestions also work offline.'],
   ];
   return (

@@ -296,10 +296,10 @@ export function AddClothingScreen(props: Props) {
   };
 
   const analysisMessage = analysisElapsed < 4
-    ? 'Fotoğraf güvenli biçimde gönderiliyor…'
+    ? 'Fotoğraf AI analizi için hazırlanıyor…'
     : analysisElapsed < 18
       ? 'AI kıyafetin renk ve tarzını inceliyor…'
-      : 'Ücretsiz sunucu uyanıyor olabilir; fotoğrafın ve taslağın güvende.';
+      : 'AI yanıtı biraz uzun sürüyor; fotoğrafın ve taslağın güvende.';
 
   const save = async () => {
     if (!draft || savingRef.current) return;
@@ -399,11 +399,14 @@ export function AddClothingScreen(props: Props) {
             {batchRemaining > 1 ? <Notice>{l(`Toplu ekleme kuyruğu: bu parçayla birlikte ${batchRemaining} fotoğraf kaldı.`, `Bulk queue: ${batchRemaining} photos remain including this item.`)}</Notice> : null}
             {analysisMode === 'undecided' ? (
               <Notice>
-                {l('Fotoğrafın hazır. Akıllı analizle özellikleri otomatik çıkarabilir veya fotoğrafı göndermeden alanları ücretsiz olarak elle doldurabilirsin.', 'Your photo is ready. Use smart analysis to fill attributes, or complete them manually for free without sending the photo.')}
+                {l('Fotoğrafın hazır. AI renk, tür ve tarz alanlarını senin için doldurabilir; istersen bilgileri ücretsiz olarak kendin girebilirsin.', 'Your photo is ready. AI can fill in color, type, and style, or you can enter the details yourself for free.')}
               </Notice>
             ) : null}
             {analysisMode === 'undecided' && props.analysisRemaining === 0 ? (
-              <Notice tone="error">{l('Akıllı fotoğraf analizi hakkın doldu. Fotoğrafın güvende; elle doldurarak ücretsiz devam edebilirsin.', 'Your smart photo analysis credits are used up. Your photo is safe; continue manually for free.')}</Notice>
+              <Notice tone="error">{l('AI analiz kredin bitti. Fotoğrafın güvende; bilgileri kendin girerek ücretsiz devam edebilirsin.', 'Your AI analysis credits are used up. Your photo is safe; enter the details yourself for free.')}</Notice>
+            ) : null}
+            {analysisMode === 'undecided' && props.analysisRemaining !== undefined && props.analysisRemaining > 0 ? (
+              <Text style={styles.creditNote}>{l(`Kalan AI analiz kredin: ${props.analysisRemaining} 🪙`, `AI analysis credits left: ${props.analysisRemaining} 🪙`)}</Text>
             ) : null}
             <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
               <View style={styles.mediaColumn}>
@@ -413,7 +416,7 @@ export function AddClothingScreen(props: Props) {
                     <ActivityIndicator color={colors.primary} />
                     <View style={styles.analysisCopy}>
                       <Text style={styles.analysisTitle}>{l('Analiz sürüyor', 'Analysis in progress')} · {analysisElapsed} {l('sn', 'sec')}</Text>
-                      <Text style={styles.analysisText}>{language === 'tr' ? analysisMessage : analysisElapsed < 4 ? 'Uploading the photo securely…' : analysisElapsed < 18 ? 'Checking its colors and style…' : 'The free server may be waking up; your photo and draft are safe.'}</Text>
+                      <Text style={styles.analysisText}>{language === 'tr' ? analysisMessage : analysisElapsed < 4 ? 'Preparing the photo for AI analysis…' : analysisElapsed < 18 ? 'AI is checking its colors and style…' : 'AI is taking a little longer; your photo and draft are safe.'}</Text>
                     </View>
                   </View>
                 ) : null}
@@ -425,12 +428,12 @@ export function AddClothingScreen(props: Props) {
                 {learnedApplied ? <Notice>{l('Önceki düzeltmelerine göre bazı alanlar telefonda otomatik düzeltildi.', 'Some fields were corrected on your phone using your previous edits.')}</Notice> : null}
                 {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
                 {draft.analysisError ? (
-                  <SecondaryButton title={t('common.retry')} onPress={() => runAnalysis(draft)} disabled={analyzing || busy} />
+                  <SecondaryButton title={l('✦ AI ile tekrar dene · 1 🪙', '✦ Try AI again · 1 🪙')} onPress={() => runAnalysis(draft)} disabled={analyzing || busy || props.analysisRemaining === 0} />
                 ) : null}
               </View>
               <View style={styles.formColumn}>
                 {analysisMode === 'undecided' ? (
-                  <Notice>{l('Devam etmek için aşağıdan akıllı analizi veya elle doldurmayı seç.', 'Choose smart analysis or manual entry below to continue.')}</Notice>
+                  <Notice>{l('AI ile otomatik doldurmayı veya bilgileri kendin girmeyi seç.', 'Choose AI autofill or enter the details yourself.')}</Notice>
                 ) : !analyzing ? (
                   <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
                 ) : (
@@ -447,9 +450,9 @@ export function AddClothingScreen(props: Props) {
         <StickyFooter>
           {analysisMode === 'undecided' ? (
             <>
-              <SecondaryButton title={l('Elle doldur · Ücretsiz', 'Enter manually · Free')} onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
+              <SecondaryButton title={l('Bilgileri kendim gireceğim · Ücretsiz', 'Enter details myself · Free')} onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
               <PrimaryButton
-                title={`${l('Akıllı analiz', 'Smart analysis')}${props.analysisRemaining === undefined ? '' : ` · ${props.analysisRemaining} ${l('hak', 'credits')}`}`}
+                title={l('✦ AI ile analiz et · 1 🪙', '✦ Analyze with AI · 1 🪙')}
                 onPress={() => void runAnalysis(draft)}
                 loading={analyzing}
                 disabled={busy || props.analysisRemaining === 0}
@@ -480,14 +483,14 @@ const styles = StyleSheet.create({
   categoryList: { gap: spacing.md, marginTop: spacing.md },
   selectedCategory: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   selectedCategoryText: { color: colors.text, fontSize: 23, fontWeight: '900' },
-  guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: '#EEE7D8', gap: spacing.sm },
+  guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.warningSoft, gap: spacing.sm },
   guideTitle: { color: colors.accent, fontSize: 13, fontWeight: '800' },
   guideText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
   reviewLayout: { gap: spacing.lg },
   reviewLayoutWide: { flexDirection: 'row', alignItems: 'flex-start' },
   mediaColumn: { flex: 0.9, minWidth: 280, gap: spacing.md },
   formColumn: { flex: 1.1, minWidth: 280 },
-  preview: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: '#EDE8DE' },
+  preview: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: colors.surfaceMuted },
   analysisBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.primarySoft },
   analysisCopy: { flex: 1, gap: 4 },
   analysisTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
@@ -495,5 +498,6 @@ const styles = StyleSheet.create({
   busyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   footerButton: { flex: 1 },
   storageNote: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  creditNote: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: '900', textAlign: 'center' },
 });
 

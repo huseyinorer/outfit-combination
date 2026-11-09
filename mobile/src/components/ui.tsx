@@ -33,7 +33,7 @@ export function PrimaryButton({ title, onPress, disabled, loading, style }: Butt
         style,
       ]}
     >
-      {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{title}</Text>}
+      {loading ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.primaryText}>{title}</Text>}
     </Pressable>
   );
 }
@@ -141,8 +141,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
-  primaryText: { color: colors.white, fontSize: 17, fontWeight: '700' },
+  primaryText: { color: colors.onPrimary, fontSize: 17, lineHeight: 22, fontWeight: '700', textAlign: 'center' },
   secondaryButton: {
     minHeight: 50,
     borderRadius: radius.md,
@@ -152,8 +153,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
-  secondaryText: { color: colors.primary, fontSize: 16, fontWeight: '700' },
+  secondaryText: { color: colors.primary, fontSize: 16, lineHeight: 21, fontWeight: '700', textAlign: 'center' },
   dangerButton: {
     minHeight: 48,
     borderRadius: radius.md,
@@ -162,8 +164,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
-  dangerText: { color: colors.danger, fontSize: 16, fontWeight: '700' },
+  dangerText: { color: colors.danger, fontSize: 16, lineHeight: 21, fontWeight: '700', textAlign: 'center' },
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.45 },
   chip: {
@@ -177,7 +180,7 @@ const styles = StyleSheet.create({
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  chipTextSelected: { color: colors.white },
+  chipTextSelected: { color: colors.onPrimary },
   field: { gap: spacing.xs },
   fieldLabel: { color: colors.text, fontSize: 14, fontWeight: '700' },
   input: {
@@ -198,7 +201,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     padding: spacing.md,
   },
-  noticeError: { backgroundColor: '#F8E2DF' },
+  noticeError: { backgroundColor: colors.dangerSoft },
   noticeText: { color: colors.primary, fontSize: 14, lineHeight: 20 },
   noticeTextError: { color: colors.danger },
   header: {

@@ -33,8 +33,8 @@ async function readError(response: Response, language: AppLanguage): Promise<str
     const body = (await response.json()) as { code?: string; message?: string; error?: string };
     if (language === 'en') {
       const messages: Record<string, string> = {
-        account_session_required: 'Sign in to use smart features.',
-        ai_quota_exceeded: 'Your smart feature credits are used up. Local features remain available.',
+        account_session_required: 'Sign in to use AI features.',
+        ai_quota_exceeded: 'Your AI credits are used up. Quick Outfits remain available.',
         quota_service_unavailable: 'Usage credits cannot be verified, so no paid request was sent.',
         missing_category: 'Add at least one item in every main category.',
       };

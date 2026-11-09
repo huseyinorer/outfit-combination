@@ -6,7 +6,9 @@ import type {
   CorrectionRule,
   FavoriteOutfit,
   OutfitFeedbackValue,
+  OutfitPreferences,
   OutfitSuggestion,
+  SuggestedOutfitHistoryEntry,
   WornOutfit,
 } from '../domain/types';
 
@@ -108,6 +110,26 @@ export async function initializeDatabase(): Promise<void> {
       wornAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_worn_owner_date ON worn_outfits(ownerId, wornAt DESC);
+    CREATE TABLE IF NOT EXISTS suggestion_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      batchId TEXT NOT NULL,
+      ownerId TEXT NOT NULL,
+      title TEXT NOT NULL,
+      topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
+      source TEXT NULL,
+      destination TEXT NOT NULL,
+      look TEXT NOT NULL,
+      tone TEXT NOT NULL,
+      suggestedAt TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_date
+      ON suggestion_history(ownerId, suggestedAt DESC, position ASC);
+    CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_batch
+      ON suggestion_history(ownerId, batchId);
   `);
 
   const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(clothing_items)');
@@ -189,6 +211,7 @@ export async function activateWardrobeOwner(
           await database.runAsync('UPDATE ai_corrections SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           await database.runAsync('UPDATE outfit_feedback SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           await database.runAsync('UPDATE worn_outfits SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
+          await database.runAsync('UPDATE suggestion_history SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           for (const key of ['pending_draft', 'pending_queue']) {
             await database.runAsync(
               `INSERT OR REPLACE INTO app_settings(key, value)
@@ -224,6 +247,7 @@ export async function moveAccountWardrobeToLocal(userId: string): Promise<void> 
     await database.runAsync('UPDATE ai_corrections SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     await database.runAsync('UPDATE outfit_feedback SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     await database.runAsync('UPDATE worn_outfits SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
+    await database.runAsync('UPDATE suggestion_history SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     for (const key of ['pending_draft', 'pending_queue']) {
       const localKey = `${key}:${LOCAL_OWNER}`;
       const sourceKey = `${key}:${sourceOwner}`;
@@ -317,6 +341,10 @@ export async function removeClothing(id: string): Promise<void> {
     );
     await database.runAsync(
       'DELETE FROM worn_outfits WHERE ownerId = ? AND (topId = ? OR bottomId = ? OR shoeId = ?)',
+      activeOwnerId, id, id, id,
+    );
+    await database.runAsync(
+      'DELETE FROM suggestion_history WHERE ownerId = ? AND (topId = ? OR bottomId = ? OR shoeId = ?)',
       activeOwnerId, id, id, id,
     );
     await database.runAsync('DELETE FROM clothing_items WHERE id = ? AND ownerId = ?', id, activeOwnerId);
@@ -437,6 +465,15 @@ export async function savePendingQueue(queue: ClothingDraft[]): Promise<void> {
   const key = scopedSettingKey('pending_queue');
   if (queue.length > 0) await setSetting(key, JSON.stringify(queue));
   else await deleteSetting(key);
+}
+
+export async function clearPendingClothing(): Promise<void> {
+  const database = await db();
+  await database.runAsync(
+    'DELETE FROM app_settings WHERE key IN (?, ?)',
+    scopedSettingKey('pending_draft'),
+    scopedSettingKey('pending_queue'),
+  );
 }
 
 const correctionFields = ['name', 'subType', 'primaryColor', 'pattern'] as const;
@@ -560,11 +597,74 @@ export async function listWornOutfits(limit = 30): Promise<WornOutfit[]> {
   );
 }
 
+type SuggestionHistoryRow = Omit<SuggestedOutfitHistoryEntry, 'preferences'> & OutfitPreferences;
+
+export async function saveSuggestionHistory(
+  suggestions: OutfitSuggestion[],
+  preferences: OutfitPreferences,
+  suggestedAt = new Date(),
+): Promise<string | null> {
+  if (suggestions.length === 0) return null;
+  const database = await db();
+  const iso = suggestedAt.toISOString();
+  const batchId = `${activeOwnerId}|${iso}|${Math.random().toString(36).slice(2, 10)}`;
+  await database.withTransactionAsync(async () => {
+    for (const [position, suggestion] of suggestions.entries()) {
+      await database.runAsync(
+        `INSERT INTO suggestion_history(
+          id, batchId, ownerId, title, topId, bottomId, shoeId, reason, source,
+          destination, look, tone, suggestedAt, position
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `${batchId}|${position}`,
+        batchId,
+        activeOwnerId,
+        suggestion.title,
+        suggestion.topId,
+        suggestion.bottomId,
+        suggestion.shoeId,
+        suggestion.reason,
+        suggestion.source ?? null,
+        preferences.destination,
+        preferences.look,
+        preferences.tone,
+        iso,
+        position,
+      );
+    }
+  });
+  return batchId;
+}
+
+export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedOutfitHistoryEntry[]> {
+  const database = await db();
+  const rows = await database.getAllAsync<SuggestionHistoryRow>(
+    `SELECT id, batchId, title, topId, bottomId, shoeId, reason, source,
+       destination, look, tone, suggestedAt, position
+     FROM suggestion_history
+     WHERE ownerId = ? AND batchId IN (
+       SELECT batchId FROM suggestion_history
+       WHERE ownerId = ?
+       GROUP BY batchId
+       ORDER BY MAX(suggestedAt) DESC
+       LIMIT ?
+     )
+     ORDER BY suggestedAt DESC, position ASC`,
+    activeOwnerId,
+    activeOwnerId,
+    Math.max(1, Math.min(batchLimit, 100)),
+  );
+  return rows.map(({ destination, look, tone, ...entry }) => ({
+    ...entry,
+    preferences: { destination, look, tone },
+  }));
+}
+
 export async function clearAllUserData(): Promise<void> {
   const database = await db();
   await database.withTransactionAsync(async () => {
     await database.runAsync('DELETE FROM outfit_feedback');
     await database.runAsync('DELETE FROM worn_outfits');
+    await database.runAsync('DELETE FROM suggestion_history');
     await database.runAsync('DELETE FROM favorite_outfits');
     await database.runAsync('DELETE FROM clothing_items');
     await database.runAsync('DELETE FROM ai_corrections');

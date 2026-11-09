@@ -9,6 +9,7 @@ import {
   StatusBar as NativeStatusBar,
   StyleSheet,
   Text,
+  useColorScheme,
   View,
 } from 'react-native';
 import Constants from 'expo-constants';
@@ -16,6 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UpdateGate } from './src/components/UpdateGate';
 import {
   clearAllUserData,
+  clearPendingClothing,
   activateWardrobeOwner,
   deleteSetting,
   getPendingDraft,
@@ -32,6 +34,7 @@ import {
   savePendingDraft,
   savePendingQueue,
   saveFavoriteOutfit,
+  saveSuggestionHistory,
   setSetting,
   softDeleteClothing,
   restoreClothing,
@@ -64,7 +67,13 @@ import {
   signOutAccount,
   type AccountState,
 } from './src/services/accountAuth';
-import { LocalizationProvider, deviceLanguage, translate, type AppLanguage } from './src/locales';
+import {
+  LocalizationProvider,
+  deviceLanguage,
+  translate,
+  type AppLanguage,
+  type AppLanguagePreference,
+} from './src/locales';
 import { AddClothingScreen } from './src/screens/AddClothingScreen';
 import { EditClothingScreen } from './src/screens/EditClothingScreen';
 import { FavoritesScreen } from './src/screens/FavoritesScreen';
@@ -76,7 +85,11 @@ import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
-import { colors } from './src/theme/theme';
+import {
+  applyThemePreference,
+  colors,
+  type AppThemePreference,
+} from './src/theme/theme';
 
 type Screen =
   | { name: 'auth'; returnTo?: 'home' | 'settings' }
@@ -84,7 +97,7 @@ type Screen =
   | { name: 'add'; category?: Category; resume?: boolean }
   | { name: 'edit'; item: ClothingItem }
   | { name: 'recommend' }
-  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string }
+  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history' }
   | { name: 'favorites' }
   | { name: 'history' }
   | { name: 'settings' }
@@ -109,7 +122,11 @@ export default function App() {
     user: null,
     usage: null,
   });
-  const [language, setLanguageState] = useState<AppLanguage>(deviceLanguage);
+  const [systemLanguage, setSystemLanguage] = useState<AppLanguage>(deviceLanguage);
+  const [languagePreference, setLanguagePreferenceState] = useState<AppLanguagePreference>('system');
+  const [themePreference, setThemePreferenceState] = useState<AppThemePreference>('system');
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const language = languagePreference === 'system' ? systemLanguage : languagePreference;
   const [apiUrl, setApiUrl] = useState(bundledApiUrl);
   const [ready, setReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -122,9 +139,16 @@ export default function App() {
   const versionCheckInFlightRef = useRef(false);
   const t = (key: Parameters<typeof translate>[1], values?: Record<string, string | number>) => translate(language, key, values);
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
-  const changeLanguage = useCallback((nextLanguage: AppLanguage) => {
-    setLanguageState(nextLanguage);
-    void setSetting('language', nextLanguage);
+  const changeLanguage = useCallback((nextLanguage: AppLanguagePreference) => {
+    setLanguagePreferenceState(nextLanguage);
+    void setSetting('language_preference', nextLanguage);
+    if (nextLanguage === 'system') void deleteSetting('language');
+    else void setSetting('language', nextLanguage);
+  }, []);
+  const changeTheme = useCallback((nextTheme: AppThemePreference) => {
+    setThemePreferenceState(nextTheme);
+    applyThemePreference(nextTheme);
+    void setSetting('theme_preference', nextTheme);
   }, []);
 
   const refresh = async () => setItems(await listClothing());
@@ -169,7 +193,8 @@ export default function App() {
 
   const goBack = useCallback(() => {
     if (screen.name === 'results') {
-      setScreen({ name: 'recommend' });
+      if (screen.returnTo === 'history') setScreen({ name: 'history' });
+      else setScreen({ name: 'recommend' });
       return;
     }
     if (screen.name === 'privacy') {
@@ -189,14 +214,30 @@ export default function App() {
     const start = async () => {
       try {
         await initializeDatabase();
-        const [storedApi, storedConsent, onboarding, authGate, storedLanguage] = await Promise.all([
+        const [storedApi, storedConsent, onboarding, authGate, storedLanguage, storedLanguagePreference, storedThemePreference] = await Promise.all([
           getSetting('api_url'),
           getSetting('ai_consent_version'),
           getSetting('onboarding_completed'),
           getSetting('auth_gate_completed'),
           getSetting('language'),
+          getSetting('language_preference'),
+          getSetting('theme_preference'),
         ]);
-        if (storedLanguage === 'tr' || storedLanguage === 'en') setLanguageState(storedLanguage);
+        const startupLanguagePreference: AppLanguagePreference = storedLanguagePreference === 'system'
+          || storedLanguagePreference === 'tr'
+          || storedLanguagePreference === 'en'
+          ? storedLanguagePreference
+          : storedLanguage === 'tr' || storedLanguage === 'en'
+            ? storedLanguage
+            : 'system';
+        const startupLanguage = startupLanguagePreference === 'system' ? deviceLanguage() : startupLanguagePreference;
+        setSystemLanguage(deviceLanguage());
+        setLanguagePreferenceState(startupLanguagePreference);
+        const startupTheme: AppThemePreference = storedThemePreference === 'light' || storedThemePreference === 'dark'
+          ? storedThemePreference
+          : 'system';
+        setThemePreferenceState(startupTheme);
+        applyThemePreference(startupTheme);
         setAiConsentGranted(storedConsent === AI_CONSENT_VERSION);
         const resolvedApiUrl = internalToolsEnabled
           ? normalizeApiBaseUrl(storedApi ?? bundledApiUrl)
@@ -217,8 +258,8 @@ export default function App() {
         };
         if (resolvedApiUrl) {
           try {
-            nextAccount = await completeInitialAccountSignIn(resolvedApiUrl, storedLanguage === 'en' ? 'en' : 'tr')
-              ?? await loadAccountState(resolvedApiUrl, storedLanguage === 'en' ? 'en' : 'tr');
+            nextAccount = await completeInitialAccountSignIn(resolvedApiUrl, startupLanguage)
+              ?? await loadAccountState(resolvedApiUrl, startupLanguage);
           } catch {
             // Hesap servisi kapalıyken misafir kullanım yolu açık kalır.
           }
@@ -273,7 +314,10 @@ export default function App() {
     if (!ready) return undefined;
     void checkVersion();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void checkVersion();
+      if (state === 'active') {
+        setSystemLanguage(deviceLanguage());
+        void checkVersion();
+      }
     });
     return () => subscription.remove();
   }, [checkVersion, ready]);
@@ -299,6 +343,19 @@ export default function App() {
   const persistQueue = async (queue: ClothingDraft[]) => {
     await savePendingQueue(queue);
     setPendingQueueState(queue);
+  };
+
+  const cancelPendingDraft = async () => {
+    const pendingPhotoUris = new Set(
+      [pendingDraft, ...pendingQueue]
+        .filter((draft): draft is ClothingDraft => Boolean(draft))
+        .map((draft) => draft.photoUri),
+    );
+    await clearPendingClothing();
+    setPendingDraftState(null);
+    setPendingQueueState([]);
+    pendingPhotoUris.forEach(deleteStoredImage);
+    tactileSuccess(t('home.pendingCancelled'));
   };
 
   const saveNewItem = async (item: ClothingItem) => {
@@ -373,6 +430,19 @@ export default function App() {
     }
   };
 
+  const showNewResults = async (
+    suggestions: OutfitSuggestion[],
+    warning: string | undefined,
+    preferences: OutfitPreferences,
+  ) => {
+    try {
+      await saveSuggestionHistory(suggestions, preferences);
+    } catch {
+      // Geçmiş kaydı başarısız olsa bile oluşturulan kombinler kullanıcıya gösterilir.
+    }
+    setScreen({ name: 'results', suggestions, warning, preferences, returnTo: 'recommend' });
+  };
+
   const saveApiUrl = async (nextApiUrl: string) => {
     if (!internalToolsEnabled) return;
     const normalizedApiUrl = normalizeApiBaseUrl(nextApiUrl);
@@ -395,7 +465,7 @@ export default function App() {
   const revokeAiConsent = async () => {
     await deleteSetting('ai_consent_version');
     setAiConsentGranted(false);
-    tactileSuccess(l('Akıllı özellik izni kapatıldı.', 'Smart feature permission turned off.'));
+    tactileSuccess(l('AI özellikleri kapatıldı.', 'AI features were turned off.'));
   };
 
   const requestAiConsent = async (): Promise<boolean> => {
@@ -408,8 +478,8 @@ export default function App() {
         resolve(value);
       };
       Alert.alert(
-        l('Akıllı özelliklere izin ver', 'Allow smart features'),
-        language === 'tr' ? AI_DISCLOSURE : 'When you choose photo analysis, the reduced image is processed once to identify clothing attributes. Outfit requests contain only preferences and text attributes, never photos or file paths. Original wardrobe photos stay on your phone. You can withdraw this permission at any time.',
+        l('AI özelliklerine izin ver', 'Allow AI features'),
+        language === 'tr' ? AI_DISCLOSURE : 'AI can analyze a reduced clothing photo once and create outfits from text attributes. Outfit creation never sends your photos or file paths. Original wardrobe photos stay on your phone, and you can turn AI access off at any time.',
         [
           { text: l('Yalnızca telefonda devam et', 'Continue only on this phone'), style: 'cancel', onPress: () => finish(false) },
           {
@@ -526,6 +596,10 @@ export default function App() {
     setPendingDraftState(null);
     setPendingQueueState([]);
     setAiConsentGranted(false);
+    setSystemLanguage(deviceLanguage());
+    setLanguagePreferenceState('system');
+    setThemePreferenceState('system');
+    applyThemePreference('system');
     await activateWardrobeOwner(null);
     setAccount((current) => ({ ...current, user: null, usage: null }));
     setApiUrl(bundledApiUrl);
@@ -544,9 +618,9 @@ export default function App() {
 
   if (!ready) {
     return (
-      <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
-        <View style={styles.center}>
-          <StatusBar style="dark" />
+      <LocalizationProvider language={language} languagePreference={languagePreference} onLanguageChange={changeLanguage}>
+        <View key={`loading-${colorScheme}`} style={styles.center}>
+          <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loading}>{t('startup.loading')}</Text>
         </View>
@@ -556,9 +630,9 @@ export default function App() {
 
   if (startupError) {
     return (
-      <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
-        <View style={styles.center}>
-          <StatusBar style="dark" />
+      <LocalizationProvider language={language} languagePreference={languagePreference} onLanguageChange={changeLanguage}>
+        <View key={`error-${colorScheme}`} style={styles.center}>
+          <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
           <Text style={styles.errorTitle}>{t('startup.error')}</Text>
           <Text style={styles.errorText}>{startupError}</Text>
         </View>
@@ -631,7 +705,7 @@ export default function App() {
             : undefined}
           onBack={goBack}
           onAddCategory={(category) => setScreen({ name: 'add', category })}
-          onResults={(suggestions, warning, preferences) => setScreen({ name: 'results', suggestions, warning, preferences })}
+          onResults={showNewResults}
         />
       );
       break;
@@ -659,7 +733,18 @@ export default function App() {
       );
       break;
     case 'history':
-      content = <HistoryScreen items={items} onBack={goBack} />;
+      content = (
+        <HistoryScreen
+          items={items}
+          onBack={goBack}
+          onOpenSuggestions={(suggestions, preferences) => setScreen({
+            name: 'results',
+            suggestions,
+            preferences,
+            returnTo: 'history',
+          })}
+        />
+      );
       break;
     case 'settings':
       content = (
@@ -669,6 +754,9 @@ export default function App() {
           currentVersion={currentVersion}
           internalToolsEnabled={internalToolsEnabled}
           account={account}
+          themePreference={themePreference}
+          colorScheme={colorScheme}
+          onThemeChange={changeTheme}
           onSaveApiUrl={saveApiUrl}
           onSignIn={async () => setScreen({ name: 'auth', returnTo: 'settings' })}
           onSignOut={disconnectAccount}
@@ -700,6 +788,7 @@ export default function App() {
           onOpen={(item) => setScreen({ name: 'edit', item })}
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
+          onCancelDraft={cancelPendingDraft}
           onSettings={() => setScreen({ name: 'settings' })}
           onSignIn={async () => setScreen({ name: 'auth', returnTo: 'home' })}
           onFavorites={() => setScreen({ name: 'favorites' })}
@@ -711,9 +800,9 @@ export default function App() {
   }
 
   return (
-    <LocalizationProvider language={language} onLanguageChange={changeLanguage}>
-      <View style={styles.safeArea}>
-        <StatusBar style="dark" />
+    <LocalizationProvider language={language} languagePreference={languagePreference} onLanguageChange={changeLanguage}>
+      <View key={`app-${colorScheme}`} style={styles.safeArea}>
+        <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
         {content}
         {recentlyDeleted ? (
           <View style={styles.undoBar}>
@@ -747,8 +836,8 @@ const styles = StyleSheet.create({
   loading: { color: colors.text, fontSize: 16, fontWeight: '700' },
   errorTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   errorText: { color: colors.danger, fontSize: 14, textAlign: 'center' },
-  undoBar: { position: 'absolute', left: 16, right: 16, bottom: 18, minHeight: 54, borderRadius: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: '#25231F' },
-  undoText: { flex: 1, color: colors.white, fontSize: 14, fontWeight: '700' },
-  undoAction: { color: '#CFE8D7', fontSize: 13, fontWeight: '900', letterSpacing: .5 },
+  undoBar: { position: 'absolute', left: 16, right: 16, bottom: 18, minHeight: 54, borderRadius: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.snackbar },
+  undoText: { flex: 1, color: colors.snackbarText, fontSize: 14, fontWeight: '700' },
+  undoAction: { color: colors.snackbarAction, fontSize: 13, fontWeight: '900', letterSpacing: .5 },
 });
 

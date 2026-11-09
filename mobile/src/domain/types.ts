@@ -75,6 +75,14 @@ export interface WornOutfit extends OutfitSuggestion {
   wornAt: string;
 }
 
+export interface SuggestedOutfitHistoryEntry extends OutfitSuggestion {
+  id: string;
+  batchId: string;
+  suggestedAt: string;
+  position: number;
+  preferences: OutfitPreferences;
+}
+
 export interface CorrectionRule {
   category: Category;
   field: 'name' | 'subType' | 'primaryColor' | 'pattern';

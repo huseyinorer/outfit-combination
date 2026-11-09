@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,252,246,0.92)',
   },
   menuText: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
-  image: { width: '100%', aspectRatio: 0.88, backgroundColor: '#ECE7DC' },
+  image: { width: '100%', aspectRatio: 0.88, backgroundColor: colors.surfaceMuted },
   body: { padding: spacing.sm, gap: 3 },
   name: { color: colors.text, fontSize: 15, fontWeight: '700' },
   meta: { color: colors.muted, fontSize: 12 },

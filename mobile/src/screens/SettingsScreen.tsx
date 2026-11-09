@@ -13,11 +13,16 @@ import Constants from 'expo-constants';
 import { ContentFrame } from '../components/layout';
 import { DangerButton, Field, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { isSecureApiBaseUrl, isValidApiBaseUrl, normalizeApiBaseUrl } from '../domain/apiUrl';
-import { AI_DISCLOSURE } from '../domain/privacy';
 import { getApiHealth } from '../services/api';
 import type { AccountState } from '../services/accountAuth';
 import { useI18n } from '../locales';
-import { colors, radius, spacing } from '../theme/theme';
+import {
+  colors,
+  radius,
+  spacing,
+  type AppColorScheme,
+  type AppThemePreference,
+} from '../theme/theme';
 
 type ConnectionState = 'idle' | 'checking' | 'online' | 'degraded' | 'offline' | 'invalid';
 
@@ -27,6 +32,9 @@ interface Props {
   currentVersion: string;
   internalToolsEnabled: boolean;
   account: AccountState;
+  themePreference: AppThemePreference;
+  colorScheme: AppColorScheme;
+  onThemeChange: (preference: AppThemePreference) => void;
   onSaveApiUrl: (apiUrl: string) => Promise<void>;
   onSignIn: () => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -41,7 +49,7 @@ interface Props {
 }
 
 export function SettingsScreen(props: Props) {
-  const { language, setLanguage, t } = useI18n();
+  const { language, languagePreference, setLanguage, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const [url, setUrl] = useState(normalizeApiBaseUrl(props.apiUrl));
   const [busy, setBusy] = useState(false);
@@ -146,8 +154,8 @@ export function SettingsScreen(props: Props) {
     Alert.alert(
       l('Tüm yerel verileri sil', 'Delete all local data'),
       l(
-        'Kıyafetler, fotoğraflar, favoriler, taslaklar ve ayarlar bu cihazdan kalıcı olarak silinecek.',
-        'Clothing, photos, favorites, drafts, and settings will be permanently deleted from this device.',
+        'Kıyafetler, fotoğraflar, favoriler, taslaklar, kombin geçmişi ve ayarlar bu cihazdan kalıcı olarak silinecek.',
+        'Clothing, photos, favorites, drafts, outfit history, and settings will be permanently deleted from this device.',
       ),
       [
         { text: t('common.cancel'), style: 'cancel' },
@@ -191,6 +199,23 @@ export function SettingsScreen(props: Props) {
             ? l('API adresi geçersiz.', 'The API address is invalid.')
             : l('Bağlantı henüz kontrol edilmedi.', 'The connection has not been checked yet.');
 
+  const preferenceOption = (
+    label: string,
+    selected: boolean,
+    onPress: () => void,
+  ) => (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.preferenceOption, selected && styles.preferenceOptionSelected, pressed && styles.pressed]}
+    >
+      <Text style={[styles.preferenceLabel, selected && styles.preferenceLabelSelected]}>
+        {selected ? '✓ ' : ''}{label}
+      </Text>
+    </Pressable>
+  );
+
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScreenHeader title={t('settings.title')} onBack={props.onBack} />
@@ -203,28 +228,44 @@ export function SettingsScreen(props: Props) {
         <ContentFrame maxWidth={760} style={styles.content}>
           <View style={styles.card}>
             <Text style={styles.title}>{t('settings.language')}</Text>
-            <View style={styles.languageRow}>
-              <SecondaryButton title={t('settings.turkish')} onPress={() => setLanguage('tr')} style={styles.languageButton} />
-              <SecondaryButton title={t('settings.english')} onPress={() => setLanguage('en')} style={styles.languageButton} />
+            <Text style={styles.text}>{l('Sistem seçiliyken uygulama telefonunun dilini kullanır.', 'When System is selected, the app follows your phone language.')}</Text>
+            <View accessibilityRole="radiogroup" style={styles.preferenceGrid}>
+              {preferenceOption(l('🌐 Sistem', '🌐 System'), languagePreference === 'system', () => setLanguage('system'))}
+              {preferenceOption(`🇹🇷 ${t('settings.turkish')}`, languagePreference === 'tr', () => setLanguage('tr'))}
+              {preferenceOption(`🇬🇧 ${t('settings.english')}`, languagePreference === 'en', () => setLanguage('en'))}
+            </View>
+          </View>
+          <View style={styles.card}>
+            <Text style={styles.title}>{l('Görünüm', 'Appearance')}</Text>
+            <Text style={styles.text}>
+              {l(
+                `Sistem seçiliyken telefonunu takip eder. Şu anda ${props.colorScheme === 'dark' ? 'koyu' : 'açık'} tema kullanılıyor.`,
+                `System follows your phone. The ${props.colorScheme} theme is currently active.`,
+              )}
+            </Text>
+            <View accessibilityRole="radiogroup" style={styles.preferenceGrid}>
+              {preferenceOption(l('🌗 Sistem', '🌗 System'), props.themePreference === 'system', () => props.onThemeChange('system'))}
+              {preferenceOption(l('☀️ Açık', '☀️ Light'), props.themePreference === 'light', () => props.onThemeChange('light'))}
+              {preferenceOption(l('🌙 Koyu', '🌙 Dark'), props.themePreference === 'dark', () => props.onThemeChange('dark'))}
             </View>
           </View>
           <View style={styles.card}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>{l('Akıllı özellikler', 'Smart features')}</Text>
+              <Text style={styles.title}>{l('✦ AI özellikleri', '✦ AI features')}</Text>
               <View style={[styles.statusBadge, props.aiConsentGranted && styles.statusBadgeActive]}>
                 <Text style={[styles.statusText, props.aiConsentGranted && styles.statusTextActive]}>
-                  {props.aiConsentGranted ? l('İzin açık', 'Allowed') : l('İzin kapalı', 'Not allowed')}
+                  {props.aiConsentGranted ? l('AI açık', 'AI enabled') : l('AI kapalı', 'AI disabled')}
                 </Text>
               </View>
             </View>
-            <Text style={styles.text}>{language === 'tr' ? AI_DISCLOSURE : 'When you choose photo analysis, the selected image is sent securely for one-time recognition. Outfit requests include only clothing IDs and text attributes, never photos or file paths.'}</Text>
+            <Text style={styles.text}>{l('Fotoğrafını AI ile analiz etmeyi veya dolabından AI ile kombin oluşturmayı yalnızca sen seçtiğinde kullanırız. Kombin oluştururken fotoğrafların paylaşılmaz.', 'AI is used only when you choose photo analysis or AI outfit creation. Your photos are never shared while creating outfits.')}</Text>
             <Notice>
-              {l('Bu izin kapalıyken kıyafetlerini elle kaydedebilir ve kombinlerini telefonunda ücretsiz hazırlayabilirsin.', 'When this permission is off, you can still save clothing manually and create local outfits for free.')}
+              {l('AI kapalıyken kıyafetlerini elle kaydedebilir ve Hızlı Kombin özelliğini ücretsiz kullanabilirsin.', 'When AI is off, you can still save clothing manually and use Quick Outfits for free.')}
             </Notice>
             {props.aiConsentGranted ? (
-              <SecondaryButton title={l('Akıllı özellik iznini kapat', 'Turn off smart feature permission')} onPress={() => void revokeConsent()} disabled={privacyBusy} />
+              <SecondaryButton title={l('AI özelliklerini kapat', 'Turn off AI features')} onPress={() => void revokeConsent()} disabled={privacyBusy} />
             ) : (
-              <PrimaryButton title={l('Akıllı özelliklere izin ver', 'Allow smart features')} onPress={() => void grantConsent()} loading={privacyBusy} />
+              <PrimaryButton title={l('AI özelliklerine izin ver', 'Allow AI features')} onPress={() => void grantConsent()} loading={privacyBusy} />
             )}
             <Pressable accessibilityRole="button" onPress={props.onPrivacy} hitSlop={8}>
               <Text style={styles.inlineLink}>{l('Verilerinin nasıl kullanıldığını gör', 'See how your data is used')}</Text>
@@ -250,32 +291,32 @@ export function SettingsScreen(props: Props) {
                   {props.account.usage ? (
                     <View style={styles.usageGrid}>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>{l('FOTOĞRAF TANIMA', 'PHOTO RECOGNITION')}</Text>
+                        <Text style={styles.usageLabel}>{l('✦ AI FOTOĞRAF ANALİZİ', '✦ AI PHOTO ANALYSIS')}</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyAnalysisLimit - props.account.usage.dailyAnalysisUsed,
                             props.account.usage.monthlyAnalysisLimit - props.account.usage.monthlyAnalysisUsed,
-                          ))} {l('hak', 'credits')}
+                          ))} 🪙
                         </Text>
                         <Text style={styles.usageDetail}>
-                          {l('Bugün', 'Today')} {props.account.usage.dailyAnalysisUsed}/{props.account.usage.dailyAnalysisLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyAnalysisUsed}/{props.account.usage.monthlyAnalysisLimit}
+                          {l('Her analiz 1 🪙', 'Each analysis costs 1 🪙')} · {l('Bugün', 'Today')} {props.account.usage.dailyAnalysisUsed}/{props.account.usage.dailyAnalysisLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyAnalysisUsed}/{props.account.usage.monthlyAnalysisLimit}
                         </Text>
                       </View>
                       <View style={styles.usageCard}>
-                        <Text style={styles.usageLabel}>{l('KOMBİN ÖNERİSİ', 'OUTFIT SUGGESTIONS')}</Text>
+                        <Text style={styles.usageLabel}>{l('✦ AI İLE KOMBİN', '✦ AI OUTFITS')}</Text>
                         <Text style={styles.usageValue}>
                           {Math.max(0, Math.min(
                             props.account.usage.dailyOutfitLimit - props.account.usage.dailyOutfitUsed,
                             props.account.usage.monthlyOutfitLimit - props.account.usage.monthlyOutfitUsed,
-                          ))} {l('hak', 'credits')}
+                          ))} 🪙
                         </Text>
                         <Text style={styles.usageDetail}>
-                          {l('Bugün', 'Today')} {props.account.usage.dailyOutfitUsed}/{props.account.usage.dailyOutfitLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyOutfitUsed}/{props.account.usage.monthlyOutfitLimit}
+                          {l('Her istek 1 🪙', 'Each request costs 1 🪙')} · {l('Bugün', 'Today')} {props.account.usage.dailyOutfitUsed}/{props.account.usage.dailyOutfitLimit} · {l('Bu ay', 'This month')} {props.account.usage.monthlyOutfitUsed}/{props.account.usage.monthlyOutfitLimit}
                         </Text>
                       </View>
                     </View>
-                  ) : <Notice>{l('Kullanım hakları şu anda yüklenemedi.', 'Usage credits could not be loaded.')}</Notice>}
-                  {props.account.stale ? <Notice>{l('Son bilinen hesap bilgileri gösteriliyor; sunucuya şu anda ulaşılamadı.', 'Showing the last known account details because the service is unavailable.')}</Notice> : null}
+                  ) : <Notice>{l('AI kredilerin şu anda yüklenemedi.', 'AI credits could not be loaded.')}</Notice>}
+                  {props.account.stale ? <Notice>{l('Hesap bilgilerin şu anda yenilenemedi; son bilinen değerler gösteriliyor.', 'Your account could not be refreshed, so the last known values are shown.')}</Notice> : null}
                   <SecondaryButton title={t('settings.signOut')} onPress={() => void signOut()} disabled={accountBusy} />
                   <DangerButton title={t('settings.deleteAccount')} onPress={confirmDeleteAccount} disabled={accountBusy} />
                 </>
@@ -376,7 +417,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   title: { color: colors.text, fontSize: 20, fontWeight: '900' },
   text: { color: colors.muted, fontSize: 14, lineHeight: 21 },
-  statusBadge: { borderRadius: 99, backgroundColor: '#E9E5DC', paddingHorizontal: 10, paddingVertical: 6 },
+  statusBadge: { borderRadius: 99, backgroundColor: colors.surfaceMuted, paddingHorizontal: 10, paddingVertical: 6 },
   statusBadgeActive: { backgroundColor: colors.primarySoft },
   statusText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   statusTextActive: { color: colors.primary },
@@ -392,13 +433,17 @@ const styles = StyleSheet.create({
   usageLabel: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
   usageValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
   usageDetail: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  languageRow: { flexDirection: 'row', gap: spacing.sm },
-  languageButton: { flex: 1 },
+  preferenceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  preferenceOption: { minHeight: 48, flexGrow: 1, flexBasis: 150, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.sm, backgroundColor: colors.surface },
+  preferenceOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  preferenceLabel: { color: colors.text, fontSize: 14, fontWeight: '800' },
+  preferenceLabelSelected: { color: colors.primary },
+  pressed: { opacity: 0.72 },
   internalCard: {
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#C9B789',
-    backgroundColor: '#F8F1DF',
+    borderColor: colors.developerBorder,
+    backgroundColor: colors.developerSurface,
     overflow: 'hidden',
   },
   internalHeader: { minHeight: 72, padding: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.md },

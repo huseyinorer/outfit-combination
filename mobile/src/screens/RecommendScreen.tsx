@@ -26,7 +26,7 @@ interface Props {
     suggestions: OutfitSuggestion[],
     warning: string | undefined,
     preferences: OutfitPreferences,
-  ) => void;
+  ) => Promise<void>;
 }
 
 export function RecommendScreen(props: Props) {
@@ -63,13 +63,18 @@ export function RecommendScreen(props: Props) {
 
   const submitLocal = async () => {
     if (busy || missing.length > 0) return;
+    setBusy(true);
     setError(null);
-    const excluded = await listDislikedOutfitKeys();
-    props.onResults(
-      completeSuggestions(props.items, preferences, [], excluded),
-      l('Kombinler fotoğraf ve özelliklerin cihazından gönderilmeden yerel kurallarla hazırlandı.', 'Outfits were created with local rules without sending photos or attributes off your device.'),
-      preferences,
-    );
+    try {
+      const excluded = await listDislikedOutfitKeys();
+      await props.onResults(
+        completeSuggestions(props.items, preferences, [], excluded),
+        l('Hızlı Kombin ile ücretsiz seçenekler hazırlandı.', 'Free options were created with Quick Outfits.'),
+        preferences,
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitAi = async () => {
@@ -79,24 +84,23 @@ export function RecommendScreen(props: Props) {
     setError(null);
     try {
       if (!await props.onRequestAiAccess()) {
-        setError(l('Akıllı öneri kullanılmadı. Ücretsiz yerel öneriyi seçebilirsin.', 'Smart suggestions were not used. You can choose the free local option.'));
+        setError(l('AI ile kombin oluşturma başlatılmadı. Hızlı Kombin seçeneğini ücretsiz kullanabilirsin.', 'AI outfit creation was not started. You can use Quick Outfits for free.'));
         return;
       }
       try {
         const response = await requestOutfits(props.apiUrl, preferences, props.items, language);
         const checked = completeSuggestions(props.items, preferences, response.suggestions, await listDislikedOutfitKeys());
         const mobileCompleted = checked.some((x) => x.source === 'local');
-        props.onResults(
+        await props.onResults(
           checked,
-          response.warning ?? (response.usedFallback || mobileCompleted ? l('Bazı öneriler yerel kurallarla tamamlandı.', 'Some suggestions were completed with local rules.') : undefined),
+          response.warning ?? (response.usedFallback || mobileCompleted ? l('En iyi seçenekleri tamamlamak için Hızlı Kombin desteği kullanıldı.', 'Quick Outfits helped complete the best options.') : undefined),
           preferences,
         );
-      } catch (apiError) {
+      } catch {
         const local = completeSuggestions(props.items, preferences, [], await listDislikedOutfitKeys());
-        const message = apiError instanceof Error ? apiError.message : l('Bağlantı kurulamadı.', 'Could not connect.');
-        props.onResults(
+        await props.onResults(
           local,
-          l(`Akıllı öneri servisine ulaşılamadı (${message}). Yerel öneriler gösteriliyor.`, `The smart suggestion service is unavailable (${message}). Showing local suggestions.`),
+          l('AI şu anda yanıt vermiyor. Beklememen için Hızlı Kombin seçenekleri hazırlandı.', 'AI is not responding right now. Quick Outfits were prepared so you do not have to wait.'),
           preferences,
         );
       }
@@ -115,7 +119,7 @@ export function RecommendScreen(props: Props) {
             <View style={styles.missingCard}>
               <Text style={styles.missingTitle}>{l('Önce dolabını tamamlayalım', 'Complete your wardrobe first')}</Text>
               <Text style={styles.missingText}>
-                {l(`Kombin için ${missing.map(categoryLabel).join(', ')} kategorisinden en az bir parça gerekli. Bu durumda akıllı öneri isteği gönderilmez.`, `Add at least one item in ${missing.map(categoryLabel).join(', ')}. No smart request is sent while a category is missing.`)}
+                {l(`Kombin hazırlamak için ${missing.map(categoryLabel).join(', ')} kategorisinden en az bir parça ekle.`, `Add at least one item in ${missing.map(categoryLabel).join(', ')} to create an outfit.`)}
               </Text>
               {missing.map((category) => (
                 <SecondaryButton key={category} title={`${categoryLabel(category)} ${l('ekle', 'add')}`} onPress={() => props.onAddCategory(category)} />
@@ -146,23 +150,26 @@ export function RecommendScreen(props: Props) {
                 <Notice>
                   {elapsed < 5
                     ? l(`Seçimlerin hazırlanıyor · ${elapsed} sn`, `Preparing your choices · ${elapsed} sec`)
-                    : l(`Akıllı öneri bekleniyor · ${elapsed} sn. Ulaşılamazsa yerel kombinler otomatik gösterilecek.`, `Waiting for smart suggestions · ${elapsed} sec. Local outfits will appear automatically if unavailable.`)}
+                    : l(`✦ AI kombinlerini hazırlıyor · ${elapsed} sn. Gerekirse Hızlı Kombin otomatik devreye girecek.`, `✦ AI is creating your outfits · ${elapsed} sec. Quick Outfits will step in automatically if needed.`)}
                 </Notice>
               ) : null}
               {error ? <Notice tone="error">{error}</Notice> : null}
               {props.outfitRemaining === 0 ? (
-                <Notice tone="error">{l('Akıllı kombin hakkın doldu. Yerel öneri ücretsiz olarak kullanılabilir.', 'Your smart outfit credits are used up. Local suggestions remain free.')}</Notice>
+                <Notice tone="error">{l('AI kombin kredin bitti. Hızlı Kombin ücretsiz olarak kullanılabilir.', 'Your AI outfit credits are used up. Quick Outfits remain free.')}</Notice>
               ) : null}
-              <Text style={styles.privacy}>{l('Bu istekte sunucuya yalnızca seçimlerin, kıyafet ID’leri ve yazılı özellikler gider; fotoğraf ve dosya yolu gönderilmez.', 'Only your choices, clothing IDs, and text attributes are sent; photos and file paths are never included.')}</Text>
+              {props.outfitRemaining !== undefined && props.outfitRemaining > 0 ? (
+                <Text style={styles.credit}>{l(`Kalan AI kombin kredin: ${props.outfitRemaining} 🪙`, `AI outfit credits left: ${props.outfitRemaining} 🪙`)}</Text>
+              ) : null}
+              <Text style={styles.privacy}>{l('Kombin oluştururken kıyafet fotoğrafların paylaşılmaz.', 'Your clothing photos are never shared while creating outfits.')}</Text>
             </>
           )}
         </ContentFrame>
       </ScrollView>
       {missing.length === 0 ? (
         <StickyFooter>
-          <SecondaryButton title={l('Yerel öner · Ücretsiz', 'Local suggestions · Free')} onPress={() => void submitLocal()} disabled={busy} style={styles.footerButton} />
+          <SecondaryButton title={l('⚡ Hızlı Kombin · Ücretsiz', '⚡ Quick Outfits · Free')} onPress={() => void submitLocal()} disabled={busy} style={styles.footerButton} />
           <PrimaryButton
-            title={`${l('Akıllı öner', 'Smart suggestions')}${props.outfitRemaining === undefined ? '' : ` · ${props.outfitRemaining} ${l('hak', 'credits')}`}`}
+            title={l('✦ AI ile Kombin Bul · 1 🪙', '✦ Find Outfits with AI · 1 🪙')}
             onPress={() => void submitAi()}
             loading={busy}
             disabled={props.outfitRemaining === 0}
@@ -189,5 +196,6 @@ const styles = StyleSheet.create({
   missingTitle: { color: colors.text, fontSize: 22, fontWeight: '900' },
   missingText: { color: colors.muted, fontSize: 15, lineHeight: 23 },
   privacy: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  credit: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: '900', textAlign: 'center' },
   footerButton: { flex: 1 },
 });

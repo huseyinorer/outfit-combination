@@ -170,7 +170,9 @@ export function ResultsScreen(props: Props) {
             <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.titleWrap}>
-                <Text style={styles.counter}>{index + 1} / {displayed.length}</Text>
+                <Text style={styles.counter}>
+                  {index + 1} / {displayed.length} · {item.source === 'ai' ? l('✦ AI ile hazırlandı', '✦ Created with AI') : l('⚡ Hızlı Kombin', '⚡ Quick Outfit')}
+                </Text>
                 <Text style={styles.title}>{item.title}</Text>
               </View>
               <Pressable
@@ -273,7 +275,7 @@ const styles = StyleSheet.create({
   counter: { color: colors.accent, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
   title: { color: colors.text, fontSize: 23, fontWeight: '900' },
   favoriteButton: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
-  favoriteButtonActive: { backgroundColor: '#F8E2DF', borderColor: '#D7A6A1' },
+  favoriteButtonActive: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
   favoriteIcon: { color: colors.primary, fontSize: 28, lineHeight: 32 },
   favoriteIconActive: { color: colors.danger },
   photoHint: { color: colors.muted, fontSize: 11, textAlign: 'center', marginTop: -8 },

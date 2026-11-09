@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -75,14 +76,18 @@ export function AuthScreen(props: Props) {
               </Pressable>
             ) : <View />}
             <View style={styles.languageRow}>
-              <Chip label="Türkçe" selected={language === 'tr'} onPress={() => setLanguage('tr')} />
-              <Chip label="English" selected={language === 'en'} onPress={() => setLanguage('en')} />
+              <Chip label="🇹🇷 Türkçe" selected={language === 'tr'} onPress={() => setLanguage('tr')} />
+              <Chip label="🇬🇧 English" selected={language === 'en'} onPress={() => setLanguage('en')} />
             </View>
           </View>
 
           <View style={styles.brandMark}>
-            <View style={styles.hangerLine} />
-            <Text style={styles.brandInitial}>OC</Text>
+            <Image
+              accessibilityIgnoresInvertColors
+              resizeMode="contain"
+              source={require('../../assets/adaptive-icon.png')}
+              style={styles.brandLogo}
+            />
           </View>
           <Text style={styles.eyebrow}>{t('auth.eyebrow')}</Text>
           <Text style={styles.title}>{t('auth.title')}</Text>
@@ -180,9 +185,8 @@ const styles = StyleSheet.create({
   languageRow: { flexDirection: 'row', gap: spacing.xs },
   backButton: { minHeight: 40, justifyContent: 'center', paddingRight: spacing.sm },
   backLabel: { color: colors.primary, fontSize: 14, fontWeight: '800' },
-  brandMark: { width: 72, height: 72, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: colors.primarySoft },
-  hangerLine: { position: 'absolute', top: 20, width: 32, height: 2, borderRadius: 2, backgroundColor: colors.primary, transform: [{ rotate: '-18deg' }] },
-  brandInitial: { color: colors.primary, fontSize: 21, fontWeight: '900', marginTop: 14 },
+  brandMark: { width: 88, height: 88, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 28, backgroundColor: colors.primarySoft },
+  brandLogo: { width: 82, height: 82 },
   eyebrow: { color: colors.accent, textAlign: 'center', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
   title: { color: colors.text, textAlign: 'center', fontSize: 29, lineHeight: 35, fontWeight: '900' },
   subtitle: { color: colors.muted, textAlign: 'center', fontSize: 14, lineHeight: 21 },

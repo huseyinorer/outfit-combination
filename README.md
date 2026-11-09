@@ -1,5 +1,7 @@
 # Outfit Combination
 
+[![Test, publish and release](https://github.com/huseyinorer/outfit-combination/actions/workflows/pipeline.yml/badge.svg)](https://github.com/huseyinorer/outfit-combination/actions/workflows/pipeline.yml)
+
 An Android-first wardrobe and outfit recommendation app with Turkish and English UI. Clothing records are stored in account-separated SQLite wardrobes and photos are kept in the app's persistent document storage. The backend handles Google or passwordless email sessions, account-and-installation AI usage rights, one-time clothing photo analysis, AI outfit suggestions, and mobile version information.
 
 ## Project structure
@@ -25,21 +27,22 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub, EAS, and Render setup.
 - Strict validation of returned IDs, categories, and duplicate combinations
 - Up to three different valid outfits when the wardrobe permits
 - Swipeable result cards using the actual photos associated with each returned ID
-- Persistent favorite outfits, full-screen photo viewing, and alternate local suggestions
+- Persistent favorite outfits, date-ordered suggestion history, full-screen photo viewing, and alternate quick suggestions
 - Persistent bulk-add queue for up to 20 gallery images in the same category
 - Generated 420 px thumbnails and a virtualized wardrobe grid for larger closets
 - Eight-second undo for clothing deletion with crash-safe cleanup
 - First-run onboarding and local learning from repeated AI field corrections
-- Turkish and English UI, legal text, and AI responses
+- Turkish and English UI with system-language default and explicit profile override
+- System-aware light/dark theme with an explicit profile override
 - Auth-first entry with Google, passwordless email code, or an explicit local guest path
 - Separate on-device wardrobes when accounts are switched; switching accounts never deletes another wardrobe
 - Exact duplicate-photo detection before saving
 - Outfit search and richer wardrobe filters for recent, summer, and winter items
-- Per-outfit like/dislike feedback, pinned-piece replacement, and a local wear history
+- Per-outfit like/dislike feedback, pinned-piece replacement, suggestion history, and wear history
 - Responsive phone, tablet, BlueStacks, portrait, and landscape layouts
 - Per-action manual entry and local outfit suggestions that work without an API key or running backend
 - Explicit consent before any clothing photo or wardrobe metadata is sent to AI
-- Two-step deletion of all local clothing, photos, favorites, drafts, and settings
+- Two-step deletion of all local clothing, photos, favorites, drafts, histories, and settings
 - Optional Google and passwordless email account sessions with in-app account deletion
 - Server-signed, time-limited installation and account access tokens
 - Account and installation access tokens encrypted at rest with Android Keystore in native APK builds
@@ -55,9 +58,9 @@ Reliable background removal is not part of this first release. When a trustworth
 No OpenAI key or running backend is required for the local path:
 
 1. Add your own photo from the camera or gallery.
-2. Select **Elle doldur · Ücretsiz** and enter the clothing attributes.
+2. Select **Bilgileri kendim gireceğim · Ücretsiz** and enter the clothing attributes.
 3. Save the item to the local SQLite wardrobe.
-4. Select **Yerel öner · Ücretsiz** to generate outfits with the on-device rule engine.
+4. Select **Hızlı Kombin · Ücretsiz** to generate outfits with the on-device rule engine.
 
 No sample clothing is automatically added to the personal wardrobe.
 
@@ -189,7 +192,7 @@ mobile/package.json
 mobile/app-version.json
 ```
 
-The current native app version is `1.3.2`. Increment both files together for the next native release.
+The current native app version is `1.4.0`. Increment both files together for the next native release.
 
 ## Tests
 
@@ -229,7 +232,7 @@ Current local verification:
 
 - Mobile TypeScript check passed
 - Mobile tests: 17/17 passed
-- Mobile/app version consistency passed for 1.3.2
+- Mobile/app version consistency passed for 1.4.0
 - Android Metro export passed (Hermes bytecode was skipped only because this managed Windows shell blocks child executable launch); Expo Autolinking resolved both the update-installer and Keystore-backed secure-session modules
 - Expo Doctor could not be fetched in the network-restricted local environment and remains part of GitHub CI
 - This Windows environment has no Java/Android SDK, so the local Kotlin/Gradle build remains for EAS to verify
