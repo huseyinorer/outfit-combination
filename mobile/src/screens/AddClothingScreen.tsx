@@ -393,25 +393,27 @@ export function AddClothingScreen(props: Props) {
         ) : !hasPhoto ? (
           <>
             <View style={styles.selectedCategory}>
-              <Text style={styles.selectedCategoryText}>{categoryLabel(category)}</Text>
+              <View style={styles.selectedCategoryLeft}>
+                <View style={styles.selectedCategoryIcon}>
+                  <CategoryIcon category={category} color={iconColor} size={28} />
+                </View>
+                <Text style={styles.selectedCategoryText}>{categoryLabel(category)}</Text>
+              </View>
               <Chip label={l('Değiştir', 'Change')} selected={false} onPress={() => setCategory(null)} />
             </View>
-            <View style={styles.guideCard}>
-              <Text style={styles.guideTitle}>{l('Daha iyi sonuç için', 'For better results')}</Text>
-              <Text style={styles.guideText}>{localizedGuidance[category]}</Text>
-            </View>
+            <Text style={styles.guideHint}>{l('💡 ', '💡 ')}{localizedGuidance[category]}</Text>
             <PrimaryButton
-              title={lastSource === 'camera' ? l('Kamerayla çek · Son kullanılan', 'Take photo · Last used') : l('Galeriden seç · Son kullanılan', 'Choose from gallery · Last used')}
+              title={lastSource === 'camera' ? l('📸 Kameradan çek · Son kullanılan', '📸 Take photo · Last used') : l('🖼 Galeriden seç · Son kullanılan', '🖼 Choose from gallery · Last used')}
               onPress={() => openSource(lastSource)}
               disabled={busy}
             />
             <SecondaryButton
-              title={lastSource === 'camera' ? l('Galeriden seç', 'Choose from gallery') : l('Kamerayla çek', 'Take photo')}
+              title={lastSource === 'camera' ? l('🖼 Galeriden seç', '🖼 Choose from gallery') : l('📸 Kameradan çek', '📸 Take photo')}
               onPress={() => openSource(lastSource === 'camera' ? 'gallery' : 'camera')}
               disabled={busy}
             />
             <SecondaryButton
-              title={l('Galeriden toplu ekle · En fazla 20', 'Bulk add from gallery · Up to 20')}
+              title={l('🗂 Toplu ekle · En fazla 20', '🗂 Bulk add · Up to 20')}
               onPress={() => void pickMultipleFromLibrary()}
               disabled={busy}
             />
@@ -539,8 +541,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.2,
   },
-  selectedCategory: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  selectedCategoryText: { color: colors.text, fontSize: 23, fontWeight: '900' },
+  selectedCategory: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
+  selectedCategoryLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
+  selectedCategoryIcon: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  selectedCategoryText: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  guideHint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
   guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.warningSoft, gap: spacing.sm },
   guideTitle: { color: colors.accent, fontSize: 13, fontWeight: '800' },
   guideText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
