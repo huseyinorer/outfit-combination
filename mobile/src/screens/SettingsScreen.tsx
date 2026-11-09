@@ -321,9 +321,23 @@ export function SettingsScreen(props: Props) {
               </View>
               {props.account.user ? (
                 <>
-                  <View>
+                  <View style={styles.accountIdentity}>
                     <Text style={styles.accountName}>{props.account.user.displayName}</Text>
                     <Text style={styles.accountEmail}>{props.account.user.email}</Text>
+                    <View style={styles.tierRow}>
+                      <View
+                        style={[styles.tierBadge, props.account.user.tier === 'premium' && styles.tierBadgePremium]}
+                        accessibilityRole="text"
+                        accessibilityLabel={props.account.user.tier === 'premium' ? t('settings.tier.premium') : t('settings.tier.free')}
+                      >
+                        <Text style={[styles.tierBadgeText, props.account.user.tier === 'premium' && styles.tierBadgeTextPremium]}>
+                          {props.account.user.tier === 'premium' ? t('settings.tier.premium') : t('settings.tier.free')}
+                        </Text>
+                      </View>
+                    </View>
+                    {props.account.user.tier === 'premium' ? null : (
+                      <Text style={styles.tierPerks}>{t('settings.tier.premiumPerks')}</Text>
+                    )}
                   </View>
                   {props.account.usage ? (
                     <View style={styles.usageGrid}>
@@ -474,8 +488,15 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   infoLabel: { color: colors.muted, fontSize: 14 },
   infoValue: { color: colors.text, fontSize: 15, fontWeight: '800' },
+  accountIdentity: { gap: 6 },
   accountName: { color: colors.text, fontSize: 17, fontWeight: '900' },
   accountEmail: { color: colors.muted, fontSize: 13, marginTop: 3 },
+  tierRow: { flexDirection: 'row', marginTop: 4 },
+  tierBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, backgroundColor: colors.border },
+  tierBadgePremium: { backgroundColor: colors.primarySoft },
+  tierBadgeText: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.4 },
+  tierBadgeTextPremium: { color: colors.primary },
+  tierPerks: { color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
   usageGrid: { gap: spacing.sm },
   usageCard: { borderRadius: radius.md, padding: spacing.md, backgroundColor: colors.primarySoft, gap: 5 },
   usageLabel: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
