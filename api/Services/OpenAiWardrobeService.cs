@@ -37,8 +37,8 @@ public sealed class OpenAiWardrobeService(
             model = _options.Model,
             store = false,
             instructions = language == "en"
-                ? "Analyze one clothing photo for a wardrobe app. Write all free text in English. If clothing is visible, always provide a short distinctive 2-5 word name, preferably primary color + visible pattern + subtype. Do not guess brands. Leave unknown fields empty. detectedCategory must be top, bottom, shoes, or an empty string."
-                : "Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Tüm serbest metinleri Türkçe yaz. Fotoğrafta kıyafet varsa 2-5 kelimelik kısa ve ayırt edici bir name üret; mümkünse ana renk + belirgin desen + alt tür sırasını kullan. Marka tahmini yapma. Bilinmeyen alanları boş bırak. detectedCategory yalnız top, bottom, shoes veya boş string olabilir.",
+                ? "Analyze one clothing photo for a wardrobe app. Write all free text in English. If clothing is visible, always provide a short distinctive 2-5 word name, preferably primary color + visible pattern + subtype. Do not guess brands. Leave unknown fields empty. detectedCategory must be one of top, bottom, shoes, hat, accessory, outerwear or an empty string. Use 'hat' for any headwear, 'accessory' for watches, jewelry, belts, scarves and similar, 'outerwear' for jackets, coats and overcoats."
+                : "Bir gardırop uygulaması için tek bir kıyafet fotoğrafını incele. Tüm serbest metinleri Türkçe yaz. Fotoğrafta kıyafet varsa 2-5 kelimelik kısa ve ayırt edici bir name üret; mümkünse ana renk + belirgin desen + alt tür sırasını kullan. Marka tahmini yapma. Bilinmeyen alanları boş bırak. detectedCategory yalnız top, bottom, shoes, hat, accessory, outerwear veya boş string olabilir. Her türlü başlık için 'hat'; saat, takı, kemer, atkı gibi parçalar için 'accessory'; ceket, mont, palto için 'outerwear' kullan.",
             input = new object[]
             {
                 new
@@ -81,6 +81,7 @@ public sealed class OpenAiWardrobeService(
         var safeInput = new
         {
             preferences = request.Preferences,
+            extras = request.Extras,
             wardrobe = request.Wardrobe.Select(x => new
             {
                 x.Id,
@@ -101,8 +102,8 @@ public sealed class OpenAiWardrobeService(
             model = _options.Model,
             store = false,
             instructions = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase)
-                ? "You are a personal style assistant. Use only the supplied clothing IDs. Every suggestion must contain exactly one top, one bottom, and one shoes item. Never repeat a triple. Write title and reason in English. reason must be one concrete sentence about the selected colors, patterns, or style. Prefer three visually distinct suggestions when possible."
-                : "Türkçe bir kişisel stil asistanısın. Yalnızca verilen kıyafet ID'lerini kullan. Her öneride tam olarak bir top, bir bottom ve bir shoes seç. Aynı üçlüyü tekrarlama. title ve reason Türkçe olsun. reason tek cümlede seçilen parçaların renk, desen veya tarzına somut biçimde değinsin. Mümkünse görsel olarak farklı üç öneri üret.",
+                ? "You are a personal style assistant. Use only the supplied clothing IDs. Every suggestion must contain exactly one top, one bottom, and one shoes item. hatId, accessoryId and outerwearId are OPTIONAL: fill them only when the wardrobe contains that category and it genuinely improves the look. Respect the extras hints: 'include' means try hard to add that category when available, 'exclude' means never add it, 'auto' leaves it to you. Never repeat a triple. Write title and reason in English. reason must be one concrete sentence about the selected colors, patterns, or style. Prefer three visually distinct suggestions when possible."
+                : "Türkçe bir kişisel stil asistanısın. Yalnızca verilen kıyafet ID'lerini kullan. Her öneride tam olarak bir top, bir bottom ve bir shoes seç. hatId, accessoryId ve outerwearId OPSİYONELDİR: yalnız ilgili kategori dolapta varsa ve kombini gerçekten iyileştiriyorsa doldur. extras ipuçlarına uy: 'include' varsa o kategoriyi ekle, 'exclude' varsa asla ekleme, 'auto' sana bırakır. Aynı üçlüyü tekrarlama. title ve reason Türkçe olsun. reason tek cümlede seçilen parçaların renk, desen veya tarzına somut biçimde değinsin. Mümkünse görsel olarak farklı üç öneri üret.",
             input = new object[]
             {
                 new
@@ -235,7 +236,7 @@ public sealed class OpenAiWardrobeService(
             styleTags = new { type = "array", items = new { type = "string" } },
             seasons = new { type = "array", items = new { type = "string" } },
             description = new { type = "string" },
-            detectedCategory = new { type = "string", @enum = new[] { "top", "bottom", "shoes", "" } },
+            detectedCategory = new { type = "string", @enum = new[] { "top", "bottom", "shoes", "hat", "accessory", "outerwear", "" } },
             categoryConflict = new { type = "boolean" }
         },
         required = new[] { "name", "subType", "primaryColor", "secondaryColors", "pattern", "styleTags", "seasons", "description", "detectedCategory", "categoryConflict" }
@@ -309,9 +310,12 @@ public sealed class OpenAiWardrobeService(
                         topId = new { type = "string" },
                         bottomId = new { type = "string" },
                         shoeId = new { type = "string" },
+                        hatId = new { type = new[] { "string", "null" } },
+                        accessoryId = new { type = new[] { "string", "null" } },
+                        outerwearId = new { type = new[] { "string", "null" } },
                         reason = new { type = "string" }
                     },
-                    required = new[] { "title", "topId", "bottomId", "shoeId", "reason" }
+                    required = new[] { "title", "topId", "bottomId", "shoeId", "hatId", "accessoryId", "outerwearId", "reason" }
                 }
             }
         },

@@ -47,7 +47,7 @@ public static class OutfitRules
     public static IReadOnlyList<string> MissingCategories(IEnumerable<WardrobeItem> wardrobe)
     {
         var categories = wardrobe.Select(x => x.Category).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return Categories.All.Where(x => !categories.Contains(x)).ToArray();
+        return Categories.Required.Where(x => !categories.Contains(x)).ToArray();
     }
 
     public static int PossibleCount(IEnumerable<WardrobeItem> wardrobe)
@@ -75,11 +75,21 @@ public static class OutfitRules
                 !byId.TryGetValue(candidate.BottomId, out var bottom) || bottom.Category != Categories.Bottom ||
                 !byId.TryGetValue(candidate.ShoeId, out var shoes) || shoes.Category != Categories.Shoes)
                 continue;
+            if (!OptionalMatches(candidate.HatId, Categories.Hat, byId) ||
+                !OptionalMatches(candidate.AccessoryId, Categories.Accessory, byId) ||
+                !OptionalMatches(candidate.OuterwearId, Categories.Outerwear, byId))
+                continue;
 
             var key = Key(candidate.TopId, candidate.BottomId, candidate.ShoeId);
             if (seen.Add(key)) valid.Add(candidate);
         }
         return valid;
+    }
+
+    private static bool OptionalMatches(string? id, string expectedCategory, Dictionary<string, WardrobeItem> byId)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return true;
+        return byId.TryGetValue(id, out var item) && item.Category == expectedCategory;
     }
 
     public static List<OutfitSuggestion> Complete(
@@ -91,6 +101,11 @@ public static class OutfitRules
         var target = Math.Min(3, possible);
         var valid = ValidateAi(request.Wardrobe, aiCandidates).Take(target).ToList();
         var seen = valid.Select(x => Key(x.TopId, x.BottomId, x.ShoeId)).ToHashSet(StringComparer.Ordinal);
+
+        var hats = request.Wardrobe.Where(x => x.Category == Categories.Hat).ToList();
+        var accessories = request.Wardrobe.Where(x => x.Category == Categories.Accessory).ToList();
+        var outerwear = request.Wardrobe.Where(x => x.Category == Categories.Outerwear).ToList();
+        var extras = request.Extras ?? new OutfitExtras();
 
         var triples = (
             from top in request.Wardrobe.Where(x => x.Category == Categories.Top)
@@ -114,12 +129,21 @@ public static class OutfitRules
                 TopId = best.Top.Id,
                 BottomId = best.Bottom.Id,
                 ShoeId = best.Shoes.Id,
+                HatId = PickExtra(hats, extras.Hat)?.Id,
+                AccessoryId = PickExtra(accessories, extras.Accessory)?.Id,
+                OuterwearId = PickExtra(outerwear, extras.Outerwear)?.Id,
                 Reason = english
                     ? $"{Detail(best.Top, "top")}, {Detail(best.Bottom, "bottom")}, and {Detail(best.Shoes, "shoes")} create a balanced color and style combination."
                     : $"{Detail(best.Top, "Üst")}, {Detail(best.Bottom, "alt")} ve {Detail(best.Shoes, "ayakkabı")} renk ve tarz bakımından dengeli bir bütün oluşturuyor."
             });
         }
         return valid;
+    }
+
+    private static WardrobeItem? PickExtra(IReadOnlyList<WardrobeItem> pool, string mode)
+    {
+        if (string.Equals(mode, "exclude", StringComparison.OrdinalIgnoreCase)) return null;
+        return pool.FirstOrDefault();
     }
 
     private static double Score(WardrobeItem top, WardrobeItem bottom, WardrobeItem shoes, OutfitPreferences prefs)
