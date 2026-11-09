@@ -122,6 +122,8 @@ export default function App() {
   const [pendingDraft, setPendingDraftState] = useState<ClothingDraft | null>(null);
   const [pendingQueue, setPendingQueueState] = useState<ClothingDraft[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<ClothingItem | null>(null);
+  const [recentlyUnfavorited, setRecentlyUnfavorited] = useState<OutfitSuggestion | null>(null);
+  const recentlyUnfavoritedTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [aiConsentGranted, setAiConsentGranted] = useState(false);
   const [account, setAccount] = useState<AccountState>({
     enabled: false,
@@ -428,6 +430,9 @@ export default function App() {
       if (existing) {
         await removeFavoriteOutfit(existing.id);
         tactileSuccess(l('Kombin favorilerden çıkarıldı.', 'Outfit removed from favorites.'));
+        if (recentlyUnfavoritedTimeout.current) clearTimeout(recentlyUnfavoritedTimeout.current);
+        setRecentlyUnfavorited(existing);
+        recentlyUnfavoritedTimeout.current = setTimeout(() => setRecentlyUnfavorited(null), 5000);
       } else {
         await saveFavoriteOutfit(suggestion);
         tactileSuccess(l('Kombin favorilere eklendi.', 'Outfit added to favorites.'));
@@ -435,6 +440,20 @@ export default function App() {
       await refreshFavorites();
     } catch (error) {
       Alert.alert(l('Favori güncellenemedi', 'Could not update favorite'), error instanceof Error ? error.message : t('common.unknownError'));
+    }
+  };
+
+  const undoUnfavorite = async () => {
+    const item = recentlyUnfavorited;
+    if (!item) return;
+    if (recentlyUnfavoritedTimeout.current) clearTimeout(recentlyUnfavoritedTimeout.current);
+    setRecentlyUnfavorited(null);
+    try {
+      await saveFavoriteOutfit(item);
+      await refreshFavorites();
+      tactileSuccess(l('Favori geri alındı.', 'Favorite restored.'));
+    } catch (error) {
+      Alert.alert(l('Favori geri alınamadı', 'Could not restore favorite'), error instanceof Error ? error.message : t('common.unknownError'));
     }
   };
 
@@ -803,6 +822,7 @@ export default function App() {
           onHistory={() => setScreen({ name: 'history' })}
           favoriteCount={favorites.length}
           account={account}
+          onRefresh={async () => { await reloadWardrobeState(); await refreshAccount(); }}
         />
       );
   }
@@ -818,6 +838,16 @@ export default function App() {
               {t('feedback.deleted', { name: recentlyDeleted.name || t('common.clothing') })}
             </Text>
             <Pressable accessibilityRole="button" onPress={() => void undoDelete()} hitSlop={10}>
+              <Text style={styles.undoAction}>{t('feedback.undo')}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {recentlyUnfavorited ? (
+          <View style={[styles.undoBar, recentlyDeleted ? styles.undoBarStacked : null]}>
+            <Text numberOfLines={1} style={styles.undoText}>
+              {l('Favoriden çıkarıldı.', 'Removed from favorites.')}
+            </Text>
+            <Pressable accessibilityRole="button" onPress={() => void undoUnfavorite()} hitSlop={10}>
               <Text style={styles.undoAction}>{t('feedback.undo')}</Text>
             </Pressable>
           </View>
@@ -845,6 +875,7 @@ const styles = StyleSheet.create({
   errorTitle: { color: colors.text, fontSize: 23, fontWeight: '900' },
   errorText: { color: colors.danger, fontSize: 14, textAlign: 'center' },
   undoBar: { position: 'absolute', left: 16, right: 16, bottom: 18, minHeight: 54, borderRadius: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.snackbar },
+  undoBarStacked: { bottom: 82 },
   undoText: { flex: 1, color: colors.snackbarText, fontSize: 14, fontWeight: '700' },
   undoAction: { color: colors.snackbarAction, fontSize: 13, fontWeight: '900', letterSpacing: .5 },
 });
