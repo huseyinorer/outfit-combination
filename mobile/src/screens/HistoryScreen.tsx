@@ -188,7 +188,14 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
                   <Text style={styles.title}>{entry.title}</Text>
                   <Text style={styles.date}>{dateLabel(entry.wornAt)}</Text>
                 </View>
-                <OutfitPreview top={resolved.top} bottom={resolved.bottom} shoes={resolved.shoes} />
+                <OutfitPreview
+                  top={resolved.top}
+                  bottom={resolved.bottom}
+                  shoes={resolved.shoes}
+                  hat={resolved.hat}
+                  accessory={resolved.accessory}
+                  outerwear={resolved.outerwear}
+                />
                 <Text style={styles.reason}>{entry.reason}</Text>
               </View>
             );

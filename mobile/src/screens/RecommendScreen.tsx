@@ -4,9 +4,12 @@ import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { completeSuggestions, getMissingCategories } from '../domain/outfitEngine';
 import {
+  OPTIONAL_CATEGORIES,
   type Category,
   type ClothingItem,
+  type OptionalCategory,
   type OutfitPreferences,
+  type OutfitRequestExtras,
   type OutfitSuggestion,
 } from '../domain/types';
 import { requestOutfits } from '../services/api';
@@ -32,7 +35,8 @@ interface Props {
 export function RecommendScreen(props: Props) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
-  const categoryLabel = (value: Category) => t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes');
+  const categoryLabel = (value: Category) =>
+    t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes' | 'category.hat' | 'category.accessory' | 'category.outerwear');
   const any = l('Fark etmez', 'Any');
   const questions = language === 'tr' ? [
     { key: 'destination' as const, title: 'Nereye gidiyorsun?', options: ['Fark etmez', 'Günlük', 'İş/ofis', 'Arkadaş buluşması', 'Akşam yemeği', 'Özel gün'] },
@@ -49,10 +53,20 @@ export function RecommendScreen(props: Props) {
     look: any,
     tone: any,
   });
+  const [extras, setExtras] = useState<OutfitRequestExtras>({ hat: 'auto', accessory: 'auto', outerwear: 'auto' });
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const missing = useMemo(() => getMissingCategories(props.items), [props.items]);
+  const availableExtras = useMemo<OptionalCategory[]>(
+    () => OPTIONAL_CATEGORIES.filter((category) => props.items.some((item) => item.category === category)),
+    [props.items],
+  );
+  const extraModeLabels: Record<'auto' | 'include' | 'exclude', string> = {
+    auto: l('Otomatik', 'Auto'),
+    include: l('Ekle', 'Include'),
+    exclude: l('Ekleme', 'Skip'),
+  };
   const wide = width >= 900;
 
   useEffect(() => {
@@ -68,7 +82,7 @@ export function RecommendScreen(props: Props) {
     try {
       const excluded = await listDislikedOutfitKeys();
       await props.onResults(
-        completeSuggestions(props.items, preferences, [], excluded),
+        completeSuggestions(props.items, preferences, [], excluded, extras),
         l('Hızlı Kombin ile ücretsiz seçenekler hazırlandı.', 'Free options were created with Quick Outfits.'),
         preferences,
       );
@@ -88,8 +102,8 @@ export function RecommendScreen(props: Props) {
         return;
       }
       try {
-        const response = await requestOutfits(props.apiUrl, preferences, props.items, language);
-        const checked = completeSuggestions(props.items, preferences, response.suggestions, await listDislikedOutfitKeys());
+        const response = await requestOutfits(props.apiUrl, preferences, props.items, language, extras);
+        const checked = completeSuggestions(props.items, preferences, response.suggestions, await listDislikedOutfitKeys(), extras);
         const mobileCompleted = checked.some((x) => x.source === 'local');
         await props.onResults(
           checked,
@@ -97,7 +111,7 @@ export function RecommendScreen(props: Props) {
           preferences,
         );
       } catch {
-        const local = completeSuggestions(props.items, preferences, [], await listDislikedOutfitKeys());
+        const local = completeSuggestions(props.items, preferences, [], await listDislikedOutfitKeys(), extras);
         await props.onResults(
           local,
           l('AI şu anda yanıt vermiyor. Beklememen için Hızlı Kombin seçenekleri hazırlandı.', 'AI is not responding right now. Quick Outfits were prepared so you do not have to wait.'),
@@ -146,6 +160,28 @@ export function RecommendScreen(props: Props) {
                   </View>
                 ))}
               </View>
+              {availableExtras.length > 0 ? (
+                <View style={styles.question}>
+                  <Text style={styles.number}>0{questions.length + 1}</Text>
+                  <Text style={styles.questionTitle}>{l('Ekstralar', 'Extras')}</Text>
+                  <Text style={styles.extrasHint}>{l('Dolabında varsa ekleyelim mi?', 'Add these when your wardrobe has them?')}</Text>
+                  {availableExtras.map((category) => (
+                    <View key={category} style={styles.extraRow}>
+                      <Text style={styles.extraLabel}>{categoryLabel(category)}</Text>
+                      <View style={styles.options}>
+                        {(['auto', 'include', 'exclude'] as const).map((mode) => (
+                          <Chip
+                            key={mode}
+                            label={extraModeLabels[mode]}
+                            selected={(extras[category] ?? 'auto') === mode}
+                            onPress={() => setExtras({ ...extras, [category]: mode })}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               {busy ? (
                 <Notice>
                   {elapsed < 5
@@ -189,6 +225,9 @@ const styles = StyleSheet.create({
   questions: { gap: spacing.md },
   questionsWide: { flexDirection: 'row', alignItems: 'stretch' },
   question: { flex: 1, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.md },
+  extrasHint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  extraRow: { gap: spacing.sm },
+  extraLabel: { color: colors.text, fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
   number: { color: colors.accent, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
   questionTitle: { color: colors.text, fontSize: 19, fontWeight: '800' },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

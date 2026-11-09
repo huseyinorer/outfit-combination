@@ -127,6 +127,7 @@ export async function requestOutfits(
   preferences: OutfitPreferences,
   wardrobe: ClothingItem[],
   language: AppLanguage,
+  extras?: { hat?: string; accessory?: string; outerwear?: string },
 ): Promise<OutfitResult> {
   checkedBaseUrl(baseUrl, language);
   const controller = new AbortController();
@@ -137,7 +138,16 @@ export async function requestOutfits(
     const response = await accountAuthenticatedFetch(baseUrl, '/api/outfits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language, preferences, wardrobe: wardrobe.map(toApiItem) }),
+      body: JSON.stringify({
+        language,
+        preferences,
+        wardrobe: wardrobe.map(toApiItem),
+        extras: {
+          hat: extras?.hat ?? 'auto',
+          accessory: extras?.accessory ?? 'auto',
+          outerwear: extras?.outerwear ?? 'auto',
+        },
+      }),
     }, controller.signal, language);
     if (!response.ok) throw new Error(await readError(response, language));
     const body = (await response.json()) as {

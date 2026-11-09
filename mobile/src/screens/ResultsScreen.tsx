@@ -188,6 +188,9 @@ export function ResultsScreen(props: Props) {
               top={resolved.top}
               bottom={resolved.bottom}
               shoes={resolved.shoes}
+              hat={resolved.hat}
+              accessory={resolved.accessory}
+              outerwear={resolved.outerwear}
               onPressItem={setViewerItem}
             />
             <Text style={styles.photoHint}>{t('result.enlarge')}</Text>

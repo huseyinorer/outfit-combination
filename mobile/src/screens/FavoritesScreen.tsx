@@ -40,6 +40,9 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
                       top={resolved.top}
                       bottom={resolved.bottom}
                       shoes={resolved.shoes}
+                      hat={resolved.hat}
+                      accessory={resolved.accessory}
+                      outerwear={resolved.outerwear}
                       onPressItem={setViewerItem}
                     />
                     <Text style={styles.reason}>{favorite.reason}</Text>
