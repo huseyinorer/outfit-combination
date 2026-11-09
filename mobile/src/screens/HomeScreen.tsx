@@ -3,6 +3,7 @@ import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View, u
 import { type Category, type ClothingDraft, type ClothingItem } from '../domain/types';
 import { ClothingActionSheet } from '../components/ClothingActionSheet';
 import { ClothingCard } from '../components/ClothingCard';
+import { ActionCard } from '../components/ActionCard';
 import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import type { AccountState } from '../services/accountAuth';
 import { colors, radius, spacing } from '../theme/theme';
@@ -128,8 +129,20 @@ export function HomeScreen(props: Props) {
 
       <View style={styles.actions}>
         <Text style={styles.prompt}>{t('home.prompt')}</Text>
-        <PrimaryButton title={t('home.recommend')} onPress={props.onRecommend} style={styles.actionButton} />
-        <SecondaryButton title={t('home.add')} onPress={() => props.onAdd()} style={styles.actionButton} />
+        <ActionCard
+          variant="primary"
+          icon="sparkle"
+          title={t('home.recommend')}
+          hint={t('home.recommendHint')}
+          onPress={props.onRecommend}
+        />
+        <ActionCard
+          variant="secondary"
+          icon="plus"
+          title={t('home.add')}
+          hint={t('home.addHint')}
+          onPress={() => props.onAdd()}
+        />
       </View>
 
       {props.account.enabled ? (
