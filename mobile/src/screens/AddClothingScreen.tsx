@@ -5,14 +5,17 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useColorScheme,
   useWindowDimensions,
 } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
+import { CategoryIcon } from '../components/CategoryIcon';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
@@ -27,13 +30,16 @@ import {
 } from '../domain/types';
 import { analyzeClothing } from '../services/api';
 import { createThumbnail, deleteStoredImage, finalizeImage, imageContentHash, prepareSelectedImage } from '../services/imageStorage';
-import { colors, radius, spacing } from '../theme/theme';
+import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
 const guidance: Record<Category, string> = {
   top: 'Düz zemine ser, önden çek ve parçanın tamamını kadraja al.',
   bottom: 'Belden paçaya kadar tamamı görünsün; düz zeminde önden çek.',
   shoes: 'Ayakkabı çiftini yan yana koy; şekli ve rengi net görünsün.',
+  hat: 'Şapkayı düz zemine koy, tepe ve kenarları kadraja al.',
+  accessory: 'Takı, saat ya da aksesuarı düz, sade zeminde yakın çek.',
+  outerwear: 'Montu asılı ya da düz ser; yakayı, kesimi ve rengi kadrajda tut.',
 };
 
 interface Props {
@@ -54,13 +60,19 @@ interface Props {
 export function AddClothingScreen(props: Props) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
-  const categoryLabel = (value: Category) => t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes');
+  const categoryLabel = (value: Category) =>
+    t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes' | 'category.hat' | 'category.accessory' | 'category.outerwear');
   const localizedGuidance: Record<Category, string> = language === 'tr' ? guidance : {
     top: 'Lay it flat, shoot from the front, and keep the whole item in frame.',
     bottom: 'Show it from waist to hem; lay it flat and shoot from the front.',
     shoes: 'Place the pair side by side so their shape and color are clear.',
+    hat: 'Place the hat on a flat surface; keep the crown and brim in frame.',
+    accessory: 'Shoot the piece — jewelry, watch or accessory — close up on a plain surface.',
+    outerwear: 'Hang it or lay it flat; keep the collar, cut and color in frame.',
   };
   const { width } = useWindowDimensions();
+  const scheme = useColorScheme();
+  const iconColor = scheme === 'dark' ? darkPalette.primary : lightPalette.primary;
   const [draft, setDraft] = useState<ClothingDraft | null>(props.initialDraft);
   const [queue, setQueue] = useState<ClothingDraft[]>(props.initialQueue);
   const [category, setCategory] = useState<Category | null>(props.initialDraft?.category ?? props.initialCategory ?? null);
@@ -361,9 +373,20 @@ export function AddClothingScreen(props: Props) {
           <>
             <Text style={styles.heading}>{l('Ne ekliyorsun?', 'What are you adding?')}</Text>
             <Text style={styles.subheading}>{l('Önce ana kategoriyi seç.', 'Choose the main category first.')}</Text>
-            <View style={styles.categoryList}>
+            <View style={styles.categoryGrid}>
               {CATEGORIES.map((value) => (
-                <PrimaryButton key={value} title={categoryLabel(value)} onPress={() => setCategory(value)} />
+                <Pressable
+                  key={value}
+                  onPress={() => setCategory(value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={categoryLabel(value)}
+                  style={({ pressed }) => [styles.categoryCard, pressed && styles.categoryCardPressed]}
+                >
+                  <View style={styles.categoryIconWrap}>
+                    <CategoryIcon category={value} color={iconColor} size={48} />
+                  </View>
+                  <Text style={styles.categoryCardLabel}>{categoryLabel(value)}</Text>
+                </Pressable>
               ))}
             </View>
           </>
@@ -481,6 +504,41 @@ const styles = StyleSheet.create({
   heading: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: spacing.md },
   subheading: { color: colors.muted, fontSize: 15 },
   categoryList: { gap: spacing.md, marginTop: spacing.md },
+  categoryGrid: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  categoryCard: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    minHeight: 132,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  categoryCardPressed: { opacity: 0.75, borderColor: colors.primary },
+  categoryIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryCardLabel: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
   selectedCategory: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   selectedCategoryText: { color: colors.text, fontSize: 23, fontWeight: '900' },
   guideCard: { padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.warningSoft, gap: spacing.sm },
