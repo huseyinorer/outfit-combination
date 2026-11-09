@@ -67,6 +67,16 @@ export function RecommendScreen(props: Props) {
     include: l('Ekle', 'Include'),
     exclude: l('Ekleme', 'Skip'),
   };
+  const extraModeExplanations: Record<'auto' | 'include' | 'exclude', string> = {
+    auto: l('Kombine uyuyorsa AI ekler.', 'AI adds it when it fits the outfit.'),
+    include: l('Dolabından en uygun parçayı mutlaka ekler.', 'Always adds the best fit from your wardrobe.'),
+    exclude: l('Bu öneride dışarıda bırakılır.', 'Left out of this outfit.'),
+  };
+  const countByCategory = useMemo<Record<OptionalCategory, number>>(() => ({
+    hat: props.items.filter((item) => item.category === 'hat').length,
+    accessory: props.items.filter((item) => item.category === 'accessory').length,
+    outerwear: props.items.filter((item) => item.category === 'outerwear').length,
+  }), [props.items]);
   const wide = width >= 900;
 
   useEffect(() => {
@@ -164,22 +174,31 @@ export function RecommendScreen(props: Props) {
                 <View style={styles.question}>
                   <Text style={styles.number}>0{questions.length + 1}</Text>
                   <Text style={styles.questionTitle}>{l('Ekstralar', 'Extras')}</Text>
-                  <Text style={styles.extrasHint}>{l('Dolabında varsa ekleyelim mi?', 'Add these when your wardrobe has them?')}</Text>
-                  {availableExtras.map((category) => (
-                    <View key={category} style={styles.extraRow}>
-                      <Text style={styles.extraLabel}>{categoryLabel(category)}</Text>
-                      <View style={styles.options}>
-                        {(['auto', 'include', 'exclude'] as const).map((mode) => (
-                          <Chip
-                            key={mode}
-                            label={extraModeLabels[mode]}
-                            selected={(extras[category] ?? 'auto') === mode}
-                            onPress={() => setExtras({ ...extras, [category]: mode })}
-                          />
-                        ))}
+                  <Text style={styles.extrasHint}>
+                    {l('Her ekstra için üç mod var: Otomatik, Ekle, Ekleme. Seçiminin altında ne yapacağı yazar.', 'Each extra has three modes: Auto, Include, Skip. The current mode\'s meaning appears below.')}
+                  </Text>
+                  {availableExtras.map((category) => {
+                    const selectedMode = (extras[category] ?? 'auto') as 'auto' | 'include' | 'exclude';
+                    return (
+                      <View key={category} style={styles.extraRow}>
+                        <View style={styles.extraHeader}>
+                          <Text style={styles.extraLabel}>{categoryLabel(category)}</Text>
+                          <Text style={styles.extraCount}>{l(`${countByCategory[category]} parça`, `${countByCategory[category]} items`)}</Text>
+                        </View>
+                        <View style={styles.options}>
+                          {(['auto', 'include', 'exclude'] as const).map((mode) => (
+                            <Chip
+                              key={mode}
+                              label={extraModeLabels[mode]}
+                              selected={selectedMode === mode}
+                              onPress={() => setExtras({ ...extras, [category]: mode })}
+                            />
+                          ))}
+                        </View>
+                        <Text style={styles.extraExplanation}>{extraModeExplanations[selectedMode]}</Text>
                       </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               ) : null}
               {busy ? (
@@ -226,8 +245,11 @@ const styles = StyleSheet.create({
   questionsWide: { flexDirection: 'row', alignItems: 'stretch' },
   question: { flex: 1, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.md },
   extrasHint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  extraRow: { gap: spacing.sm },
+  extraRow: { gap: spacing.sm, paddingVertical: spacing.xs },
+  extraHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
   extraLabel: { color: colors.text, fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
+  extraCount: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  extraExplanation: { color: colors.primary, fontSize: 12.5, lineHeight: 18, fontWeight: '600' },
   number: { color: colors.accent, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
   questionTitle: { color: colors.text, fontSize: 19, fontWeight: '800' },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

@@ -151,14 +151,26 @@ function makeLocalSuggestion(
   const colors = [triple.top.primaryColor, triple.bottom.primaryColor, triple.shoes.primaryColor]
     .filter(Boolean)
     .join(', ');
+  const activeExtras: Array<{ item: ClothingItem; trLabel: string; enLabel: string }> = [];
+  if (extras.hat) activeExtras.push({ item: extras.hat, trLabel: 'şapka', enLabel: 'hat' });
+  if (extras.outerwear) activeExtras.push({ item: extras.outerwear, trLabel: 'mont', enLabel: 'jacket' });
+  if (extras.accessory) activeExtras.push({ item: extras.accessory, trLabel: 'aksesuar', enLabel: 'accessory' });
+
+  const baseReasonTr = `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`;
+  const baseReasonEn = `${triple.top.name || 'Top'}, ${triple.bottom.name || 'bottom'}, and ${triple.shoes.name || 'shoes'} create a balanced, practical outfit${colors ? ` with ${colors} tones` : ''}.`;
+  const extrasReasonTr = activeExtras.length > 0
+    ? ` Ekstra olarak ${activeExtras.map((e) => `${e.trLabel} (${e.item.name || e.item.subType || e.trLabel})`).join(', ')} tamamlıyor.`
+    : '';
+  const extrasReasonEn = activeExtras.length > 0
+    ? ` A ${activeExtras.map((e) => `${e.enLabel} (${e.item.name || e.item.subType || e.enLabel})`).join(', ')} rounds the look out.`
+    : '';
+
   const base: OutfitSuggestion = {
     title: `${triple.top.name || (english ? 'Top' : 'Üst')} & ${triple.bottom.name || (english ? 'Bottom' : 'Alt')}`,
     topId: triple.top.id,
     bottomId: triple.bottom.id,
     shoeId: triple.shoes.id,
-    reason: english
-      ? `${triple.top.name || 'Top'}, ${triple.bottom.name || 'bottom'}, and ${triple.shoes.name || 'shoes'} create a balanced, practical outfit${colors ? ` with ${colors} tones` : ''}.`
-      : `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`,
+    reason: english ? baseReasonEn + extrasReasonEn : baseReasonTr + extrasReasonTr,
     source: 'local',
   };
   if (extras.hat) base.hatId = extras.hat.id;
