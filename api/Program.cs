@@ -465,7 +465,7 @@ app.MapPost("/api/analyze", async (
     var language = form["language"].ToString().Equals("en", StringComparison.OrdinalIgnoreCase) ? "en" : "tr";
     var photo = form.Files.GetFile("photo");
     if (!Categories.All.Contains(category))
-        return Results.BadRequest(new { message = "Kategori top, bottom veya shoes olmalı." });
+        return Results.BadRequest(new { message = $"Kategori şu değerlerden biri olmalı: {string.Join(", ", Categories.All)}." });
     if (photo is null || photo.Length == 0)
         return Results.BadRequest(new { message = "Fotoğraf gerekli." });
     if (photo.Length > 12 * 1024 * 1024)
