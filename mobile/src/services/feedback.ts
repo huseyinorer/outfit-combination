@@ -1,7 +1,8 @@
-import { Alert, Platform, ToastAndroid, Vibration } from 'react-native';
+import { Alert, Platform, ToastAndroid } from 'react-native';
+import { hapticTick } from './haptics';
 
 export function tactileSuccess(message: string): void {
-  Vibration.vibrate(18);
+  hapticTick('success');
   if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
   else Alert.alert(message);
 }

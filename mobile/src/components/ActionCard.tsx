@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { hapticTick } from '../services/haptics';
 import { colors, radius, spacing } from '../theme/theme';
 
 type Variant = 'primary' | 'secondary';
@@ -18,7 +19,10 @@ interface Props {
 
 export function ActionCard({ title, hint, onPress, variant = 'primary', icon, accessibilityLabel, disabled }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
-  const pressIn = () => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, bounciness: 0 }).start();
+  const pressIn = () => {
+    hapticTick('light');
+    Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, bounciness: 0 }).start();
+  };
   const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5 }).start();
 
   const isPrimary = variant === 'primary';
