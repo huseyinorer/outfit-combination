@@ -14,13 +14,15 @@ Bu belge Play Console'a doğrudan yüklenmez. Form doldurulurken mevcut uygulama
 
 ## Form için önerilen beyanlar
 
+Play Console "zorunlu mu" alanı tek seçimlidir (Evet/Hayır). Veri AI akışı için zorunlu, yerel akış için isteğe bağlıdır; her satır için uygulamada yolun **temel akışında** zorunluluğu olup olmadığına bakılır. Uygulamanın temel akışı yerel modu içerdiği için fotoğraf ve içerik satırlarında **Hayır** seçilir; AI açıkça seçilen bir ek özelliktir ve forma "toplama isteğe bağlı" olarak beyan edilir.
+
 | Play veri türü | Toplanıyor/aktarılıyor | Amaç | Zorunlu mu? |
 | --- | --- | --- | --- |
-| Fotoğraflar | Yalnız AI analizi seçildiğinde işlenir | Uygulama işlevselliği | Hayır; elle giriş yolu var |
-| Kullanıcı tarafından oluşturulan içerik / diğer içerik | Kıyafet özellikleri ve kombin tercihleri | Uygulama işlevselliği | Hayır; yerel motor var |
-| Uygulama etkileşimleri | Takma adlı analiz/kombin sayaçları | Güvenlik, dolandırıcılığı önleme ve maliyet kontrolü | AI kullanımı için evet |
-| Cihaz veya diğer kimlikler | Uygulamanın ürettiği rastgele kurulum UUID'si | Güvenlik ve kötüye kullanım önleme | AI kullanımı için evet |
-| E-posta adresi, kullanıcı kimliği ve ad | Kullanıcı Google veya parolasız e-posta ile giriş yaparsa | Hesap yönetimi, güvenlik ve AI hakkı yönetimi | Yerel özellikler için hayır |
+| Fotoğraflar | Yalnız AI analizi seçildiğinde işlenir | Uygulama işlevselliği | Hayır (elle giriş yolu var) |
+| Kullanıcı tarafından oluşturulan içerik / diğer içerik | Kıyafet özellikleri ve kombin tercihleri | Uygulama işlevselliği | Hayır (yerel motor var) |
+| Uygulama etkileşimleri | Takma adlı analiz/kombin sayaçları | Güvenlik, dolandırıcılığı önleme ve maliyet kontrolü | Hayır (yalnız AI özelliği seçildiğinde toplanır) |
+| Cihaz veya diğer kimlikler | Uygulamanın ürettiği rastgele kurulum UUID'si | Güvenlik ve kötüye kullanım önleme | Hayır (yalnız AI özelliği seçildiğinde toplanır) |
+| E-posta adresi, kullanıcı kimliği ve ad | Kullanıcı Google veya parolasız e-posta ile giriş yaparsa | Hesap yönetimi, güvenlik ve AI hakkı yönetimi | Hayır (yerel özellikler için gerekmez) |
 
 ## Güvenlik cevapları
 

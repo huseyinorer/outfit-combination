@@ -31,6 +31,8 @@ const lightPalette = {
   snackbar: '#25231F',
   snackbarText: '#FFFFFF',
   snackbarAction: '#CFE8D7',
+  imageActionSurface: 'rgba(255,255,255,0.94)',
+  imageActionText: '#202124',
   white: '#FFFFFF',
 } as const;
 
@@ -56,6 +58,8 @@ const darkPalette: Record<keyof typeof lightPalette, string> = {
   snackbar: '#E7E1D7',
   snackbarText: '#171914',
   snackbarAction: '#24563C',
+  imageActionSurface: 'rgba(32,33,36,0.94)',
+  imageActionText: '#FFFFFF',
   white: '#FFFFFF',
 };
 

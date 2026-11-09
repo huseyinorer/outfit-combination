@@ -22,6 +22,7 @@ builder.Services.Configure<AppSecurityOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<AccountAuthOptions>(builder.Configuration.GetSection("AccountAuth"));
 builder.Services.Configure<EmailAuthOptions>(builder.Configuration.GetSection("EmailAuth"));
 builder.Services.Configure<UsageQuotaOptions>(builder.Configuration.GetSection("UsageQuota"));
+builder.Services.Configure<BackgroundRemovalOptions>(builder.Configuration.GetSection("BackgroundRemoval"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<InstallationTokenService>();
 builder.Services.AddSingleton<PersistentUsageQuotaService>();
@@ -36,6 +37,7 @@ builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLi
 builder.Services.AddHttpClient<OpenAiWardrobeService>(client => client.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddHttpClient<GoogleOAuthService>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<EmailOtpSender>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<BackgroundRemovalService>(client => client.Timeout = TimeSpan.FromSeconds(45));
 builder.Services.AddCors(options => options.AddPolicy("lan", policy =>
     policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
@@ -108,15 +110,34 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("email-send", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            $"email:{context.Connection.RemoteIpAddress}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromHours(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 });
 
 var app = builder.Build();
 app.UseCors("lan");
 
+app.Logger.LogInformation(
+    "startup environment={Environment} accountAuth={AccountAuth} googleEnabled={GoogleEnabled} emailEnabled={EmailEnabled} openAiModel={OpenAiModel}",
+    app.Environment.EnvironmentName,
+    accountAuthEnabled,
+    accountConfig.GoogleEnabled,
+    emailConfig.Enabled,
+    builder.Configuration["OpenAI:Model"] ?? "");
+
 app.Use(async (context, next) =>
 {
     var aiPath = context.Request.Path.StartsWithSegments("/api/analyze")
-        || context.Request.Path.StartsWithSegments("/api/outfits");
+        || context.Request.Path.StartsWithSegments("/api/outfits")
+        || context.Request.Path.StartsWithSegments("/api/background-removal");
     var accountExchangePath = context.Request.Path.StartsWithSegments("/api/account/google/start")
         || context.Request.Path.StartsWithSegments("/api/account/google/complete")
         || context.Request.Path.StartsWithSegments("/api/account/email/start")
@@ -140,10 +161,11 @@ app.Use(async (context, next) =>
         if (tokens.TryValidateUser(bearer, out var userId, out var userInstallationId))
         {
             var accounts = context.RequestServices.GetRequiredService<AccountStore>();
-            if (await accounts.GetUserAsync(userId, context.RequestAborted) is not null)
+            if (await accounts.GetUserAsync(userId, context.RequestAborted) is { } user)
             {
                 context.Items[InstallationTokenService.UserContextItemKey] = userId;
                 context.Items[InstallationTokenService.ContextItemKey] = userInstallationId;
+                context.Items[InstallationTokenService.UserTierContextItemKey] = user.Tier;
                 await next();
                 return;
             }
@@ -306,13 +328,13 @@ app.MapPost("/api/account/google/complete", async (
     if (user is null)
         return Results.BadRequest(new { message = "Oturum kodu geçersiz, kullanılmış veya süresi dolmuş." });
     var issued = tokens.IssueUser(user.Id, installationId);
-    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, cancellationToken);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, user.Tier, cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
         accessToken = issued.AccessToken,
         expiresAt = issued.ExpiresAt,
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
         usage
     });
 }).RequireRateLimiting("account-auth");
@@ -368,7 +390,7 @@ app.MapPost("/api/account/email/start", async (
         message = "Altı haneli giriş kodu e-posta adresine gönderildi.",
         expiresInSeconds = (int)emailSender.CodeLifetime.TotalSeconds
     });
-}).RequireRateLimiting("account-auth");
+}).RequireRateLimiting("email-send");
 
 app.MapPost("/api/account/email/complete", async (
     EmailSignInCompleteRequest request,
@@ -390,13 +412,13 @@ app.MapPost("/api/account/email/complete", async (
 
     var user = await accounts.UpsertEmailUserAsync(email, cancellationToken);
     var issued = tokens.IssueUser(user.Id, installationId);
-    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, cancellationToken);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, user.Tier, cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
         accessToken = issued.AccessToken,
         expiresAt = issued.ExpiresAt,
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
         usage
     });
 }).RequireRateLimiting("account-auth");
@@ -411,11 +433,11 @@ app.MapGet("/api/account/me", async (
     var userId = UserId(context);
     var user = await accounts.GetUserAsync(userId, cancellationToken);
     if (user is null) return Results.NotFound(new { message = "Kullanıcı hesabı bulunamadı." });
-    var usage = await quota.GetSnapshotAsync(userId.ToString(), InstallationId(context), cancellationToken);
+    var usage = await quota.GetSnapshotAsync(userId.ToString(), InstallationId(context), user.Tier, cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl },
+        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
         usage
     });
 });
@@ -456,10 +478,12 @@ app.MapPost("/api/analyze", async (
     try
     {
         var usageSubjects = UsageSubjects(request.HttpContext);
+        var tier = UserTier(request.HttpContext);
         var quotaDecision = await quota.TryConsumeAsync(
             usageSubjects.Primary,
             usageSubjects.Secondary,
             AiOperation.Analysis,
+            tier,
             cancellationToken);
         if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
 
@@ -479,6 +503,48 @@ app.MapPost("/api/analyze", async (
         var usageSubjects = UsageSubjects(request.HttpContext);
         await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Analysis, CancellationToken.None);
         return Results.BadRequest(new { message = error.Message });
+    }
+}).RequireRateLimiting("ai");
+
+app.MapGet("/api/background-removal/config", (IOptions<BackgroundRemovalOptions> options) => Results.Ok(new
+{
+    enabled = options.Value.Enabled,
+    provider = options.Value.Provider
+}));
+
+app.MapPost("/api/background-removal", async (
+    HttpRequest request,
+    BackgroundRemovalService backgroundRemoval,
+    CancellationToken cancellationToken) =>
+{
+    if (!backgroundRemoval.Enabled)
+        return Results.Json(new { code = "background_removal_disabled", message = "Arka plan kaldırma servisi henüz kullanıma hazır değil." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    var tier = UserTier(request.HttpContext);
+    if (!string.Equals(tier, AccountTier.Premium, StringComparison.OrdinalIgnoreCase))
+        return Results.Json(new { code = "premium_required", message = "Arka plan kaldırma premium hesaplara açıktır." }, statusCode: StatusCodes.Status402PaymentRequired);
+    if (!request.HasFormContentType)
+        return Results.BadRequest(new { message = "multipart/form-data bekleniyor." });
+
+    var form = await request.ReadFormAsync(cancellationToken);
+    var photo = form.Files.GetFile("photo");
+    if (photo is null || photo.Length == 0)
+        return Results.BadRequest(new { message = "Fotoğraf gerekli." });
+    if (photo.Length > backgroundRemoval.MaxUploadBytes)
+        return Results.BadRequest(new { message = "Fotoğraf boyutu çok büyük." });
+    var contentType = photo.ContentType.ToLowerInvariant();
+    if (contentType is not ("image/jpeg" or "image/png" or "image/webp"))
+        return Results.BadRequest(new { message = "JPEG, PNG veya WEBP fotoğraf gönder." });
+
+    try
+    {
+        await using var stream = photo.OpenReadStream();
+        var result = await backgroundRemoval.RemoveAsync(stream, contentType, cancellationToken);
+        return Results.File(result.PngBytes, result.ContentType, "cutout.png");
+    }
+    catch (BackgroundRemovalException error)
+    {
+        app.Logger.LogWarning(error, "Arka plan kaldırma başarısız");
+        return Results.Json(new { code = "background_removal_failed", message = error.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 }).RequireRateLimiting("ai");
 
@@ -503,10 +569,12 @@ app.MapPost("/api/outfits", async (
         return Results.BadRequest(new { code = "missing_category", missingCategories = missing, message = "Kombin için her ana kategoriden en az bir parça gerekli." });
 
     var usageSubjects = UsageSubjects(context);
+    var tier = UserTier(context);
     var quotaDecision = await quota.TryConsumeAsync(
         usageSubjects.Primary,
         usageSubjects.Secondary,
         AiOperation.Outfit,
+        tier,
         cancellationToken);
     if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
 
@@ -556,6 +624,11 @@ static Guid UserId(HttpContext context) =>
     context.Items[InstallationTokenService.UserContextItemKey] is Guid userId && userId != Guid.Empty
         ? userId
         : throw new InvalidOperationException("Kullanıcı oturumu doğrulanmadı.");
+
+static string UserTier(HttpContext context) =>
+    context.Items[InstallationTokenService.UserTierContextItemKey] is string tier
+        ? AccountTier.Normalize(tier)
+        : AccountTier.Free;
 
 static (string Primary, string? Secondary) UsageSubjects(HttpContext context)
 {

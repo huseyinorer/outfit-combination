@@ -92,7 +92,7 @@ Set secrets only in the backend environment:
 ```powershell
 cd C:\Users\krofosyonel\Desktop\OutfitCombination\api
 $env:OPENAI_API_KEY="your-key"
-$env:OpenAI__Model="gpt-5.4-mini"
+$env:OpenAI__Model="gpt-4.1-mini"
 $env:AppSecurity__TokenSigningKey="a-random-secret-with-at-least-32-bytes"
 $env:UsageQuota__ConnectionString="Host=...;Database=neondb;Username=...;Password=...;SSL Mode=Require"
 # Optional account authentication (set all three together):
@@ -108,7 +108,7 @@ dotnet build
 dotnet run --urls http://0.0.0.0:5080
 ```
 
-Do not place the OpenAI key, signing key, Google client secret, email provider key, or Neon connection string in source files, `appsettings.json`, Expo variables, the mobile app, or Git. The Google web client ID is public, but this implementation keeps all Google OAuth configuration on the backend. Local Development can use an in-memory quota fallback. Production fails closed and does not send an AI request when the persistent quota database is missing or unavailable.
+Do not place the OpenAI key, signing key, Google client secret, email provider key, or Neon connection string in source files, `appsettings.json`, Expo variables, the mobile app, or Git. Google OAuth uses the **Web application** client type and the full exchange runs on the backend only; the mobile client never handles the client secret or the access/refresh tokens, so both the client ID and the secret live only in Render environment variables. Local Development can use an in-memory quota fallback. Production fails closed and does not send an AI request when the persistent quota database is missing or unavailable.
 
 Google access is disabled when the three `AccountAuth` values are empty. Passwordless email access is disabled unless both `EmailAuth__ApiKey` and a valid `EmailAuth__FromAddress` are configured. A Production backend requires at least one of these providers and fails to start instead of silently allowing account-free AI access. Development can still run without either provider. Google opens the browser and returns a short-lived one-time code through `outfitcombination://auth`; email sends a six-digit, short-lived code. Both methods resolve to a stable internal account UUID. The same Neon database is used; profile, identity-link, temporary login-code, and usage tables are created automatically. No second Neon database or manual migration is required.
 
@@ -151,6 +151,24 @@ When the backend is unavailable:
 - Photos can be added through manual entry.
 - Local outfit generation still works.
 - Only AI photo analysis and AI-written outfit explanations are unavailable.
+
+## Build for iOS (preview / TestFlight)
+
+iOS build scaffolding is in place: `app.config.ts` ships an iOS `bundleIdentifier`, camera/photo usage strings, and `supportsTablet: true`; `eas.json` exposes an iOS simulator target on the `development` and `preview` profiles and an App Store build target on `production`. The custom native modules under `mobile/modules/` currently ship Android-only implementations:
+
+- `outfit-update-installer` — Android-only by design; iOS updates go through TestFlight / the App Store.
+- `outfit-secure-session` — on iOS the mobile client falls back to the SQLite `app_settings` table through `secureSessionStorage.ts`. A Keychain-backed iOS target can be added later; the public API already fails gracefully.
+
+To build an iOS simulator preview on EAS:
+
+```powershell
+cd C:\Users\krofosyonel\Desktop\OutfitCombination\mobile
+npm install
+npx expo install --fix
+npx eas-cli@latest build --platform ios --profile preview
+```
+
+Store submission needs an Apple Developer account, an App Store Connect record under the bundle identifier, and TestFlight review before public distribution. The Android-signed EAS keystore is unrelated and remains in use for APK releases.
 
 ## Build an installable Android APK
 

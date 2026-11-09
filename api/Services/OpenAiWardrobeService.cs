@@ -1,12 +1,17 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OutfitCombination.Api.Models;
 
 namespace OutfitCombination.Api.Services;
 
-public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAiOptions> options)
+public sealed class OpenAiWardrobeService(
+    HttpClient httpClient,
+    IOptions<OpenAiOptions> options,
+    ILogger<OpenAiWardrobeService> logger)
 {
     private readonly OpenAiOptions _options = options.Value;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -58,7 +63,7 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
             }
         };
 
-        var json = await SendAsync(body, cancellationToken);
+        var json = await SendAsync(body, "analyze", cancellationToken);
         var result = JsonSerializer.Deserialize<ClothingAnalysis>(json, JsonOptions)
             ?? throw new AiServiceException("AI boş analiz döndürdü.");
         result.Name = EnsureShortName(result, selectedCategory, language);
@@ -121,36 +126,61 @@ public sealed class OpenAiWardrobeService(HttpClient httpClient, IOptions<OpenAi
             }
         };
 
-        var json = await SendAsync(body, cancellationToken);
+        var json = await SendAsync(body, "outfit", cancellationToken);
         var envelope = JsonSerializer.Deserialize<OutfitAiEnvelope>(json, JsonOptions)
             ?? throw new AiServiceException("AI boş kombin yanıtı döndürdü.");
         return envelope.Suggestions;
     }
 
-    private async Task<string> SendAsync(object body, CancellationToken cancellationToken)
+    private async Task<string> SendAsync(object body, string operation, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{_options.BaseUrl.TrimEnd('/')}/responses");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey());
         request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
 
+        var stopwatch = Stopwatch.StartNew();
+        var statusCode = 0;
+        var outcome = "ok";
+
         try
         {
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            statusCode = (int)response.StatusCode;
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                outcome = statusCode >= 500 ? "server_error" : "client_error";
                 var detail = responseJson.Length > 600 ? responseJson[..600] : responseJson;
-                throw new AiServiceException($"OpenAI API {(int)response.StatusCode}: {detail}");
+                throw new AiServiceException($"OpenAI API {statusCode}: {detail}");
             }
             return ExtractOutputText(responseJson);
         }
         catch (AiServiceException)
         {
+            if (outcome == "ok") outcome = "parse_error";
             throw;
         }
-        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or JsonException)
+        catch (TaskCanceledException error)
         {
+            outcome = "timeout";
             throw new AiServiceException("OpenAI servisine ulaşılamadı veya yanıt okunamadı.", error);
+        }
+        catch (Exception error) when (error is HttpRequestException or JsonException)
+        {
+            outcome = "transport_error";
+            throw new AiServiceException("OpenAI servisine ulaşılamadı veya yanıt okunamadı.", error);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            logger.Log(
+                outcome == "ok" ? LogLevel.Information : LogLevel.Warning,
+                "ai.request operation={Operation} model={Model} durationMs={DurationMs} status={Status} outcome={Outcome}",
+                operation,
+                _options.Model,
+                stopwatch.ElapsedMilliseconds,
+                statusCode,
+                outcome);
         }
     }
 

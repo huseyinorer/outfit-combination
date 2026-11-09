@@ -88,6 +88,7 @@ import { HistoryScreen } from './src/screens/HistoryScreen';
 import {
   applyThemePreference,
   colors,
+  spacing,
   type AppThemePreference,
 } from './src/theme/theme';
 
@@ -106,6 +107,13 @@ type Screen =
 
 const bundledApiUrl = normalizeApiBaseUrl(String(Constants.expoConfig?.extra?.apiBaseUrl ?? ''));
 const internalToolsEnabled = Constants.expoConfig?.extra?.internalTools === true;
+const topSystemInset = Platform.OS === 'android'
+  ? Math.ceil(Math.max(
+    NativeStatusBar.currentHeight ?? 0,
+    Constants.statusBarHeight ?? 0,
+    24,
+  )) + spacing.xs
+  : 0;
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'auth' });
@@ -829,7 +837,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 24 : 0,
+    paddingTop: topSystemInset,
     backgroundColor: colors.background,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28, backgroundColor: colors.background },

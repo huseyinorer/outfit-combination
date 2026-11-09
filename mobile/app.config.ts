@@ -25,6 +25,28 @@ const config: ExpoConfig = {
       backgroundColor: '#F7F3EA',
     },
   },
+  ios: {
+    bundleIdentifier: 'com.krofosyonel.outfitcombination',
+    supportsTablet: true,
+    buildNumber: appVersion.version,
+    infoPlist: {
+      NSCameraUsageDescription:
+        'Kıyafet fotoğrafı çekmek için kamera erişimi gerekir. / Camera access is required to photograph clothing.',
+      NSPhotoLibraryUsageDescription:
+        'Kıyafet eklemek için galeri erişimi gerekir. / Photo library access is required to add clothing.',
+      NSPhotoLibraryAddUsageDescription:
+        'Kombin kartlarını kaydetmek için galeriye yazma izni gerekir. / Write access is required to save outfit cards to your library.',
+      ITSAppUsesNonExemptEncryption: false,
+      CFBundleAllowMixedLocalizations: true,
+      CFBundleLocalizations: ['tr', 'en'],
+      UIBackgroundModes: [],
+      UIRequiresFullScreen: false,
+    },
+    config: {
+      usesNonExemptEncryption: false,
+    },
+    associatedDomains: [],
+  },
   plugins: [
     './plugins/with-outfit-theme.cjs',
     'expo-updates',

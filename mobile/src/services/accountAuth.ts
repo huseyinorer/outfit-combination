@@ -10,11 +10,18 @@ const CONFIG_TTL_MS = 5 * 60 * 1_000;
 const CONFIG_TIMEOUT_MS = 12_000;
 const REQUEST_TIMEOUT_MS = 90_000;
 
+export type AccountTier = 'free' | 'premium';
+
 export interface AccountUser {
   id: string;
   email: string;
   displayName: string;
   pictureUrl: string | null;
+  tier: AccountTier;
+}
+
+export function normalizeTier(value: unknown): AccountTier {
+  return value === 'premium' ? 'premium' : 'free';
 }
 
 export interface AccountUsage {
@@ -139,7 +146,9 @@ function parseSession(raw: string | null, baseUrl: string): StoredSession | null
       || !value.user
       || typeof value.user.id !== 'string'
     ) return null;
-    return value as StoredSession;
+    const session = value as StoredSession;
+    session.user = { ...session.user, tier: normalizeTier((session.user as { tier?: unknown }).tier) };
+    return session;
   } catch {
     return null;
   }
@@ -193,15 +202,16 @@ export async function loadAccountState(
     }
     if (!response.ok) return { ...config, user: session.user, usage: session.usage, stale: true };
     const body = (await response.json()) as { user: AccountUser; usage: AccountUsage | null };
+    const normalizedUser: AccountUser = { ...body.user, tier: normalizeTier(body.user.tier) };
     const refreshed = {
       ...session,
-      user: body.user,
+      user: normalizedUser,
       usage: body.usage,
       googleEnabled: config.googleEnabled,
       emailEnabled: config.emailEnabled,
     };
     await saveSession(refreshed);
-    return { ...config, user: body.user, usage: body.usage };
+    return { ...config, user: normalizedUser, usage: body.usage };
   } catch {
     return { ...config, user: session.user, usage: session.usage, stale: true };
   }
@@ -276,7 +286,8 @@ async function completeAccountCode(baseUrl: string, code: string, language: AppL
     language,
   ));
   const session = (await completeResponse.json()) as StoredSession;
-  const stored: StoredSession = { ...session, baseUrl };
+  const normalizedUser: AccountUser = { ...session.user, tier: normalizeTier(session.user?.tier) };
+  const stored: StoredSession = { ...session, user: normalizedUser, baseUrl };
   await saveSession(stored);
   const config = await accountConfig(baseUrl, false, language);
   const configured = { ...stored, googleEnabled: config.googleEnabled, emailEnabled: config.emailEnabled };
@@ -362,7 +373,8 @@ export async function completeEmailSignIn(
     language,
   ));
   const session = (await response.json()) as StoredSession;
-  const stored: StoredSession = { ...session, baseUrl: cleanBaseUrl };
+  const normalizedUser: AccountUser = { ...session.user, tier: normalizeTier(session.user?.tier) };
+  const stored: StoredSession = { ...session, user: normalizedUser, baseUrl: cleanBaseUrl };
   await saveSession(stored);
   const config = await accountConfig(cleanBaseUrl, false, language);
   const configured = { ...stored, googleEnabled: config.googleEnabled, emailEnabled: config.emailEnabled };

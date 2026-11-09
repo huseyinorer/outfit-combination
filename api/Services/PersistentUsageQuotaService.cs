@@ -41,19 +41,27 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         string subjectId,
         AiOperation operation,
         CancellationToken cancellationToken)
-        => await TryConsumeAsync(subjectId, null, operation, cancellationToken);
+        => await TryConsumeAsync(subjectId, null, operation, AccountTier.Free, cancellationToken);
 
     public async Task<QuotaDecision> TryConsumeAsync(
         string primarySubjectId,
         string? secondarySubjectId,
         AiOperation operation,
         CancellationToken cancellationToken)
+        => await TryConsumeAsync(primarySubjectId, secondarySubjectId, operation, AccountTier.Free, cancellationToken);
+
+    public async Task<QuotaDecision> TryConsumeAsync(
+        string primarySubjectId,
+        string? secondarySubjectId,
+        AiOperation operation,
+        string tier,
+        CancellationToken cancellationToken)
     {
         var subjects = ParseSubjects(primarySubjectId, secondarySubjectId);
         if (subjects.Count == 0) return new QuotaDecision(QuotaStatus.Unavailable);
         if (dataSource is null)
             return developmentFallback
-                ? TryConsumeInMemory(subjects, operation)
+                ? TryConsumeInMemory(subjects, operation, tier)
                 : new QuotaDecision(QuotaStatus.Unavailable);
 
         try
@@ -74,7 +82,7 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var month = new DateOnly(today.Year, today.Month, 1);
-            var (dailyLimit, monthlyLimit) = Limits(operation);
+            var (dailyLimit, monthlyLimit) = Limits(operation, tier);
 
             var counts = new List<(Guid Subject, int Daily, int Monthly)>(subjects.Count);
             foreach (var subject in subjects)
@@ -108,16 +116,23 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
     }
 
     public async Task<UsageSnapshot?> GetSnapshotAsync(string subjectId, CancellationToken cancellationToken)
-        => await GetSnapshotAsync(subjectId, null, cancellationToken);
+        => await GetSnapshotAsync(subjectId, null, AccountTier.Free, cancellationToken);
 
     public async Task<UsageSnapshot?> GetSnapshotAsync(
         string primarySubjectId,
         string? secondarySubjectId,
         CancellationToken cancellationToken)
+        => await GetSnapshotAsync(primarySubjectId, secondarySubjectId, AccountTier.Free, cancellationToken);
+
+    public async Task<UsageSnapshot?> GetSnapshotAsync(
+        string primarySubjectId,
+        string? secondarySubjectId,
+        string tier,
+        CancellationToken cancellationToken)
     {
         var subjects = ParseSubjects(primarySubjectId, secondarySubjectId);
         if (subjects.Count == 0) return null;
-        if (dataSource is null) return developmentFallback ? SnapshotInMemory(subjects) : null;
+        if (dataSource is null) return developmentFallback ? SnapshotInMemory(subjects, tier) : null;
 
         try
         {
@@ -138,8 +153,8 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
                 monthlyOutfit = Math.Max(monthlyOutfit, await ReadCountAsync(connection, transaction, subject, "month", month, AiOperation.Outfit, cancellationToken));
             }
             await transaction.CommitAsync(cancellationToken);
-            var analysisLimits = Limits(AiOperation.Analysis);
-            var outfitLimits = Limits(AiOperation.Outfit);
+            var analysisLimits = Limits(AiOperation.Analysis, tier);
+            var outfitLimits = Limits(AiOperation.Outfit, tier);
             return new UsageSnapshot(
                 dailyAnalysis,
                 analysisLimits.Daily,
@@ -204,12 +219,11 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         }
     }
 
-    private QuotaDecision TryConsumeInMemory(IReadOnlyList<Guid> subjects, AiOperation operation)
+    private QuotaDecision TryConsumeInMemory(IReadOnlyList<Guid> subjects, AiOperation operation, string tier = AccountTier.Free)
     {
         var now = DateTime.UtcNow;
         var operationKey = operation == AiOperation.Analysis ? "analysis" : "outfit";
-        var dailyLimit = operation == AiOperation.Analysis ? options.DailyAnalysisLimit : options.DailyOutfitLimit;
-        var monthlyLimit = operation == AiOperation.Analysis ? options.MonthlyAnalysisLimit : options.MonthlyOutfitLimit;
+        var (dailyLimit, monthlyLimit) = Limits(operation, tier);
         lock (memoryLock)
         {
             var counts = subjects.Select(subject =>
@@ -233,13 +247,13 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         }
     }
 
-    private UsageSnapshot SnapshotInMemory(IReadOnlyList<Guid> subjects)
+    private UsageSnapshot SnapshotInMemory(IReadOnlyList<Guid> subjects, string tier = AccountTier.Free)
     {
         var now = DateTime.UtcNow;
         int Count(string period, string operation) => subjects.Max(subject =>
             memoryCounts.GetValueOrDefault($"{subject}:{period}:{(period == "day" ? $"{now:yyyy-MM-dd}" : $"{now:yyyy-MM}")}:{operation}"));
-        var analysisLimits = Limits(AiOperation.Analysis);
-        var outfitLimits = Limits(AiOperation.Outfit);
+        var analysisLimits = Limits(AiOperation.Analysis, tier);
+        var outfitLimits = Limits(AiOperation.Outfit, tier);
         return new UsageSnapshot(
             Count("day", "analysis"), analysisLimits.Daily,
             Count("month", "analysis"), analysisLimits.Monthly,
@@ -275,14 +289,19 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
         return values;
     }
 
-    private (int Daily, int Monthly) Limits(AiOperation operation)
+    private (int Daily, int Monthly) Limits(AiOperation operation, string tier = AccountTier.Free)
     {
-        var daily = operation == AiOperation.Analysis
+        var baseDaily = operation == AiOperation.Analysis
             ? Math.Clamp(options.DailyAnalysisLimit, 1, 10_000)
             : Math.Clamp(options.DailyOutfitLimit, 1, 10_000);
-        var monthly = operation == AiOperation.Analysis
-            ? Math.Clamp(options.MonthlyAnalysisLimit, daily, 100_000)
-            : Math.Clamp(options.MonthlyOutfitLimit, daily, 100_000);
+        var baseMonthly = operation == AiOperation.Analysis
+            ? Math.Clamp(options.MonthlyAnalysisLimit, baseDaily, 100_000)
+            : Math.Clamp(options.MonthlyOutfitLimit, baseDaily, 100_000);
+        var multiplier = string.Equals(tier, AccountTier.Premium, StringComparison.OrdinalIgnoreCase)
+            ? Math.Clamp(options.PremiumMultiplier, 1.0, 100.0)
+            : 1.0;
+        var daily = (int)Math.Min(1_000_000, Math.Max(baseDaily, Math.Round(baseDaily * multiplier)));
+        var monthly = (int)Math.Min(10_000_000, Math.Max(baseMonthly, Math.Round(baseMonthly * multiplier)));
         return (daily, monthly);
     }
 

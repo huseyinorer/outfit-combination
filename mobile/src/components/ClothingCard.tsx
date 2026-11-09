@@ -19,7 +19,14 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
       onPress={onPress}
       style={({ pressed }) => [styles.card, { width }, pressed && styles.pressed]}
     >
-      <Image source={{ uri: item.thumbnailUri ?? item.photoUri }} style={styles.image} resizeMode="cover" />
+      <Image
+        accessible
+        accessibilityIgnoresInvertColors
+        accessibilityLabel={l(`${item.name || categoryLabel} fotoğrafı`, `Photo of ${item.name || categoryLabel}`)}
+        source={{ uri: item.thumbnailUri ?? item.photoUri }}
+        style={styles.image}
+        resizeMode="cover"
+      />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={l(`${item.name || 'Kıyafet'} seçenekleri`, `${item.name || 'Clothing'} options`)}
@@ -57,9 +64,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 22,
-    backgroundColor: 'rgba(255,252,246,0.92)',
+    backgroundColor: colors.imageActionSurface,
   },
-  menuText: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
+  menuText: { color: colors.imageActionText, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   image: { width: '100%', aspectRatio: 0.88, backgroundColor: colors.surfaceMuted },
   body: { padding: spacing.sm, gap: 3 },
   name: { color: colors.text, fontSize: 15, fontWeight: '700' },

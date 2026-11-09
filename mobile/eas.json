@@ -9,6 +9,9 @@
       "distribution": "internal",
       "channel": "development",
       "environment": "development",
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "EXPO_PUBLIC_APP_ENV": "development",
         "EXPO_PUBLIC_DIRECT_APK_UPDATES": "true"
@@ -21,6 +24,9 @@
       "android": {
         "buildType": "apk"
       },
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "EXPO_PUBLIC_APP_ENV": "preview",
         "EXPO_PUBLIC_DIRECT_APK_UPDATES": "true"
@@ -32,6 +38,9 @@
       "environment": "production",
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "autoIncrement": "buildNumber"
       },
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",

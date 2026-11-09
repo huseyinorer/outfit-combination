@@ -13,6 +13,7 @@ public sealed class InstallationTokenService
 {
     public const string ContextItemKey = "OutfitCombination.InstallationId";
     public const string UserContextItemKey = "OutfitCombination.UserId";
+    public const string UserTierContextItemKey = "OutfitCombination.UserTier";
 
     private readonly byte[] signingKey;
     private readonly TimeProvider timeProvider;

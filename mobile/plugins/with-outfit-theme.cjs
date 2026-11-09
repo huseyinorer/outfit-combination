@@ -11,7 +11,8 @@ const light = {
   primary_soft: '#DDE9E0', accent: '#B36B3D', border: '#DED8CC', danger: '#A13A32',
   danger_soft: '#F8E2DF', warning_soft: '#F4E5D4', success_border: '#BFD2C5',
   warning_border: '#D8C3A8', developer_surface: '#F8F1DF', developer_border: '#C9B789',
-  snackbar: '#25231F', snackbar_text: '#FFFFFF', snackbar_action: '#CFE8D7', white: '#FFFFFF',
+  snackbar: '#25231F', snackbar_text: '#FFFFFF', snackbar_action: '#CFE8D7',
+  image_action_surface: '#FFFFFF', image_action_text: '#202124', white: '#FFFFFF',
 };
 
 const dark = {
@@ -20,7 +21,8 @@ const dark = {
   primary_soft: '#23382C', accent: '#E3A270', border: '#39423B', danger: '#F08C83',
   danger_soft: '#402522', warning_soft: '#392E22', success_border: '#416650',
   warning_border: '#70583D', developer_surface: '#302B20', developer_border: '#77663F',
-  snackbar: '#E7E1D7', snackbar_text: '#171914', snackbar_action: '#24563C', white: '#FFFFFF',
+  snackbar: '#E7E1D7', snackbar_text: '#171914', snackbar_action: '#24563C',
+  image_action_surface: '#202124', image_action_text: '#FFFFFF', white: '#FFFFFF',
 };
 
 function addPalette(modResults, palette) {

@@ -6,11 +6,21 @@ using Npgsql;
 
 namespace OutfitCombination.Api.Services;
 
+public static class AccountTier
+{
+    public const string Free = "free";
+    public const string Premium = "premium";
+    public static readonly string[] Values = [Free, Premium];
+    public static string Normalize(string? value) =>
+        string.Equals(value, Premium, StringComparison.OrdinalIgnoreCase) ? Premium : Free;
+}
+
 public sealed record AccountUser(
     Guid Id,
     string Email,
     string DisplayName,
-    string? PictureUrl);
+    string? PictureUrl,
+    string Tier);
 
 public sealed record OAuthAttempt(string State, Guid InstallationId);
 
@@ -371,7 +381,7 @@ public sealed class AccountStore : IAsyncDisposable
                   AND expires_at > now()
                 RETURNING user_id
             )
-            SELECT u.id, u.email, u.display_name, u.picture_url
+            SELECT u.id, u.email, u.display_name, u.picture_url, u.tier
             FROM consumed c
             JOIN app_users u ON u.id = c.user_id;
             """);
@@ -386,7 +396,7 @@ public sealed class AccountStore : IAsyncDisposable
         if (dataSource is null) return null;
         await EnsureInitializedAsync(cancellationToken);
         await using var command = dataSource.CreateCommand("""
-            SELECT id, email, display_name, picture_url
+            SELECT id, email, display_name, picture_url, tier
             FROM app_users
             WHERE id = @userId;
             """);
@@ -426,9 +436,13 @@ public sealed class AccountStore : IAsyncDisposable
                     email varchar(320) NOT NULL,
                     display_name varchar(200) NOT NULL DEFAULT '',
                     picture_url text NULL,
+                    tier varchar(16) NOT NULL DEFAULT 'free',
+                    tier_expires_at timestamptz NULL,
                     created_at timestamptz NOT NULL DEFAULT now(),
                     last_login_at timestamptz NOT NULL DEFAULT now()
                 );
+                ALTER TABLE app_users ADD COLUMN IF NOT EXISTS tier varchar(16) NOT NULL DEFAULT 'free';
+                ALTER TABLE app_users ADD COLUMN IF NOT EXISTS tier_expires_at timestamptz NULL;
                 CREATE TABLE IF NOT EXISTS account_identity_links (
                     subject_hash bytea PRIMARY KEY,
                     principal_id uuid NOT NULL REFERENCES account_principals(id) ON DELETE CASCADE,
@@ -490,7 +504,8 @@ public sealed class AccountStore : IAsyncDisposable
         reader.GetGuid(0),
         reader.GetString(1),
         reader.GetString(2),
-        reader.IsDBNull(3) ? null : reader.GetString(3));
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.FieldCount > 4 && !reader.IsDBNull(4) ? AccountTier.Normalize(reader.GetString(4)) : AccountTier.Free);
 
     private static string RandomToken(int bytes) => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(bytes));
     private static byte[] Hash(string token) => SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token));
@@ -606,7 +621,7 @@ public sealed class AccountStore : IAsyncDisposable
                 display_name = CASE WHEN excluded.display_name = '' THEN app_users.display_name ELSE excluded.display_name END,
                 picture_url = COALESCE(excluded.picture_url, app_users.picture_url),
                 last_login_at = now()
-            RETURNING id, email, display_name, picture_url;
+            RETURNING id, email, display_name, picture_url, tier;
             """, connection, transaction);
         command.Parameters.AddWithValue("id", userId);
         command.Parameters.AddWithValue("subject", (object?)googleSubject ?? DBNull.Value);

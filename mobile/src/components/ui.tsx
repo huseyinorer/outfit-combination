@@ -99,22 +99,28 @@ interface FieldProps extends TextInputProps {
 
 export function Field({ label, hint, multiline, ...inputProps }: FieldProps) {
   return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={styles.field} accessible={false}>
+      <Text style={styles.fieldLabel} accessibilityRole="text">{label}</Text>
       <TextInput
+        accessibilityLabel={inputProps.accessibilityLabel ?? label}
+        accessibilityHint={inputProps.accessibilityHint ?? hint}
         placeholderTextColor={colors.muted}
         multiline={multiline}
         style={[styles.input, multiline && styles.multiline]}
         {...inputProps}
       />
-      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {hint ? <Text style={styles.hint} accessibilityRole="text">{hint}</Text> : null}
     </View>
   );
 }
 
 export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: 'info' | 'error' }) {
   return (
-    <View style={[styles.notice, tone === 'error' && styles.noticeError]}>
+    <View
+      accessibilityRole="alert"
+      accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'polite'}
+      style={[styles.notice, tone === 'error' && styles.noticeError]}
+    >
       <Text style={[styles.noticeText, tone === 'error' && styles.noticeTextError]}>{children}</Text>
     </View>
   );

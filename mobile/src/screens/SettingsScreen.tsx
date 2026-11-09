@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -15,6 +16,7 @@ import { DangerButton, Field, Notice, PrimaryButton, ScreenHeader, SecondaryButt
 import { isSecureApiBaseUrl, isValidApiBaseUrl, normalizeApiBaseUrl } from '../domain/apiUrl';
 import { getApiHealth } from '../services/api';
 import type { AccountState } from '../services/accountAuth';
+import { exportWardrobe } from '../services/wardrobeExport';
 import { useI18n } from '../locales';
 import {
   colors,
@@ -57,6 +59,7 @@ export function SettingsScreen(props: Props) {
   const [accountBusy, setAccountBusy] = useState(false);
   const [developerToolsOpen, setDeveloperToolsOpen] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>('idle');
+  const [exportBusy, setExportBusy] = useState(false);
   const normalizedUrl = normalizeApiBaseUrl(url);
   const allowHttpApi = String(Constants.expoConfig?.extra?.appEnvironment ?? 'development') === 'development';
   const validUrl = isValidApiBaseUrl(url) && (allowHttpApi || isSecureApiBaseUrl(url));
@@ -104,6 +107,40 @@ export function SettingsScreen(props: Props) {
       await props.onRevokeAiConsent();
     } finally {
       setPrivacyBusy(false);
+    }
+  };
+
+  const exportMyWardrobe = async () => {
+    setExportBusy(true);
+    try {
+      const result = await exportWardrobe();
+      try {
+        await Share.share({
+          title: l('Dolap aktarımı', 'Wardrobe export'),
+          message: l(
+            'Outfit Combination dolap aktarım dosyası',
+            'Outfit Combination wardrobe export file',
+          ),
+          url: result.fileUri,
+        });
+      } catch {
+        // Paylaşım iptal edildiyse sessiz geç; kullanıcı yolu zaten alert'te görür.
+      }
+      Alert.alert(
+        l('Dolap dışa aktarıldı', 'Wardrobe exported'),
+        t('settings.exportDone', {
+          count: String(result.clothingCount),
+          favorites: String(result.favoriteCount),
+          path: result.fileUri,
+        }),
+      );
+    } catch (error) {
+      Alert.alert(
+        l('Dolap dışa aktarılamadı', 'Export failed'),
+        error instanceof Error ? error.message : t('common.unknownError'),
+      );
+    } finally {
+      setExportBusy(false);
     }
   };
 
@@ -328,6 +365,17 @@ export function SettingsScreen(props: Props) {
               )}
             </View>
           ) : null}
+
+          <View style={styles.card}>
+            <Text style={styles.title}>{t('settings.export')}</Text>
+            <Text style={styles.text}>{t('settings.exportText')}</Text>
+            <PrimaryButton
+              title={exportBusy ? t('settings.exporting') : t('settings.export')}
+              onPress={() => void exportMyWardrobe()}
+              loading={exportBusy}
+            />
+            <Text style={styles.deleteHint}>{t('settings.importText')}</Text>
+          </View>
 
           <View style={styles.card}>
             <Text style={styles.title}>{l('Gizlilik ve veriler', 'Privacy and data')}</Text>

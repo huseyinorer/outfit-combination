@@ -14,7 +14,7 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: OpenAI__Model
-        value: gpt-5.4-mini
+        value: gpt-4.1-mini
       - key: AppSecurity__TokenSigningKey
         sync: false
       - key: UsageQuota__ConnectionString
@@ -36,4 +36,6 @@ services:
       - key: MobileUpdate__ForceLatest
         value: "false"
       - key: MobileUpdate__AndroidDownloadUrl
+        sync: false
+      - key: BackgroundRemoval__ApiKey
         sync: false

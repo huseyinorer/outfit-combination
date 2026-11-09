@@ -7,6 +7,7 @@ public sealed class UsageQuotaOptions
     public int MonthlyAnalysisLimit { get; set; } = 300;
     public int DailyOutfitLimit { get; set; } = 60;
     public int MonthlyOutfitLimit { get; set; } = 900;
+    public double PremiumMultiplier { get; set; } = 5.0;
 }
 
 public enum AiOperation

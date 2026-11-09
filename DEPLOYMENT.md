@@ -72,7 +72,7 @@ UsageQuota__ConnectionString=Host=NEON_HOST;Database=neondb;Username=NEON_USER;P
 MobileUpdate__AndroidDownloadUrl=https://github.com/huseyinorer/outfit-combination/releases/latest/download/outfit-combination.apk
 ```
 
-`OpenAI__Model` varsayılan olarak `gpt-5.4-mini` ayarlanmıştır ve Render ortam değişkeninden değiştirilebilir. Anahtar yalnız Render backend'inde bulunur; APK'ya, Expo ortamına veya Git'e girmez.
+`OpenAI__Model` varsayılan olarak `gpt-4.1-mini` ayarlanmıştır ve Render ortam değişkeninden değiştirilebilir. Görüntü analizini destekleyen başka bir OpenAI modeli (örn. `gpt-4o-mini`) de aynı env ile verilebilir. Anahtar yalnız Render backend'inde bulunur; APK'ya, Expo ortamına veya Git'e girmez.
 
 `AppSecurity__TokenSigningKey` için parola kullanma; rastgele en az 32 bayt üret ve yalnız Render Secret olarak sakla. Üretim backend'i bu değer eksik veya kısa olduğunda bilinçli olarak açılmaz. Analiz ve kombin uçları yalnız sunucunun imzaladığı kurulum belirteçlerini kabul eder; mobil uygulama süresi dolan belirteci otomatik yeniler.
 
