@@ -83,6 +83,10 @@ export function applyThemePreference(preference: AppThemePreference): void {
   Appearance.setColorScheme(preference === 'system' ? 'auto' : preference);
 }
 
+export function getPaletteForScheme(scheme: AppColorScheme) {
+  return scheme === 'dark' ? darkPalette : lightPalette;
+}
+
 export function effectiveColorScheme(): AppColorScheme {
   return Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
 }

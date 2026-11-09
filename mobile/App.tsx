@@ -809,7 +809,7 @@ export default function App() {
 
   return (
     <LocalizationProvider language={language} languagePreference={languagePreference} onLanguageChange={changeLanguage}>
-      <View key={`app-${colorScheme}`} style={styles.safeArea}>
+      <View key={`app-${colorScheme}-${themePreference}`} style={styles.safeArea}>
         <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
         {content}
         {recentlyDeleted ? (
