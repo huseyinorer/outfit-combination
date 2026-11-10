@@ -33,6 +33,18 @@ export async function downloadApk(
   if (!url.toLowerCase().startsWith('https://')) throw new Error(l('Güncelleme bağlantısı güvenli değil.', 'The update link is not secure.'));
   if (!FileSystem.cacheDirectory) throw new Error(l('Güncelleme için geçici depolama alanı açılamadı.', 'Temporary update storage could not be opened.'));
 
+  // Wipe older APK downloads to keep the cache from growing one file per version.
+  try {
+    const entries = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory);
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith('outfit-combination-') && name.endsWith('.apk'))
+        .map((name) => FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${name}`, { idempotent: true })),
+    );
+  } catch {
+    // Best-effort cleanup; proceed even if the cache can't be enumerated.
+  }
+
   const destination = `${FileSystem.cacheDirectory}outfit-combination-${safeVersion(version)}.apk`;
   await FileSystem.deleteAsync(destination, { idempotent: true });
 
