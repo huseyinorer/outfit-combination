@@ -6,7 +6,7 @@ node_modules/
 dist/
 web-build/
 /.codex-export/
-/android/
+# iOS native project is still regenerated via prebuild; Android is now committed.
 /ios/
 
 # Local secrets and machine-specific settings

@@ -1,0 +1,28 @@
+<resources>
+  <color name="outfit_background">#111214</color>
+  <color name="outfit_surface">#1A1C1D</color>
+  <color name="outfit_surface_muted">#22252A</color>
+  <color name="outfit_figure">#232627</color>
+  <color name="outfit_text">#ECE8DE</color>
+  <color name="outfit_muted">#9DA19A</color>
+  <color name="outfit_primary">#D3D1C6</color>
+  <color name="outfit_on_primary">#111214</color>
+  <color name="outfit_primary_soft">#2C2E2E</color>
+  <color name="outfit_accent">#92A999</color>
+  <color name="outfit_border">#292C2D</color>
+  <color name="outfit_danger">#E29184</color>
+  <color name="outfit_danger_soft">#3A2420</color>
+  <color name="outfit_warning_soft">#322A1C</color>
+  <color name="outfit_success_border">#3F524A</color>
+  <color name="outfit_warning_border">#5F5236</color>
+  <color name="outfit_developer_surface">#1F2224</color>
+  <color name="outfit_developer_border">#3D4341</color>
+  <color name="outfit_snackbar">#1A1C1D</color>
+  <color name="outfit_snackbar_text">#ECE8DE</color>
+  <color name="outfit_snackbar_action">#92A999</color>
+  <color name="outfit_image_action_surface">#111214</color>
+  <color name="outfit_image_action_text">#ECE8DE</color>
+  <color name="outfit_white">#FFFFFF</color>
+  <color name="splashscreen_background">#111214</color>
+  <color name="iconBackground">#111214</color>
+</resources>
