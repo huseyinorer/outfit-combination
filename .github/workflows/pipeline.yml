@@ -155,14 +155,21 @@ jobs:
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android
         env:
-          ANDROID_KEYSTORE_FILE: release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
           EXPO_PUBLIC_APP_ENV: production
           EXPO_PUBLIC_DIRECT_APK_UPDATES: "true"
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+          STORE_FILE: ${{ github.workspace }}/mobile/android/app/release.keystore
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -f "$STORE_FILE" || { echo "keystore missing at $STORE_FILE"; exit 1; }
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="$STORE_FILE" \
+            -Pandroid.injected.signing.store.password="$STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
       - name: Print APK signer certificate
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android
