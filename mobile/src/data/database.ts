@@ -43,7 +43,7 @@ export async function initializeDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS clothing_items (
       id TEXT PRIMARY KEY NOT NULL,
       ownerId TEXT NOT NULL DEFAULT 'local',
-      category TEXT NOT NULL CHECK(category IN ('top', 'bottom', 'shoes')),
+      category TEXT NOT NULL,
       name TEXT NOT NULL DEFAULT '',
       subType TEXT NOT NULL DEFAULT '',
       primaryColor TEXT NOT NULL DEFAULT '',
@@ -158,6 +158,51 @@ export async function initializeDatabase(): Promise<void> {
     if (!cols.has('hatId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN hatId TEXT NULL;`);
     if (!cols.has('accessoryId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN accessoryId TEXT NULL;`);
     if (!cols.has('outerwearId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN outerwearId TEXT NULL;`);
+  }
+
+  // Drop the legacy CHECK(category IN ('top','bottom','shoes')) by rebuilding the table.
+  // This is a no-op once the constraint is gone.
+  const legacy = await database.getFirstAsync<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='clothing_items'",
+  );
+  if (legacy?.sql && /CHECK\s*\(\s*category\s+IN\s*\(\s*'top'/i.test(legacy.sql)) {
+    await database.execAsync(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN TRANSACTION;
+      ALTER TABLE clothing_items RENAME TO clothing_items_legacy;
+      CREATE TABLE clothing_items (
+        id TEXT PRIMARY KEY NOT NULL,
+        ownerId TEXT NOT NULL DEFAULT 'local',
+        category TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        subType TEXT NOT NULL DEFAULT '',
+        primaryColor TEXT NOT NULL DEFAULT '',
+        secondaryColors TEXT NOT NULL DEFAULT '[]',
+        pattern TEXT NOT NULL DEFAULT '',
+        styleTags TEXT NOT NULL DEFAULT '[]',
+        seasons TEXT NOT NULL DEFAULT '[]',
+        description TEXT NOT NULL DEFAULT '',
+        photoUri TEXT NOT NULL,
+        thumbnailUri TEXT NULL,
+        cutoutUri TEXT NULL,
+        photoHash TEXT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        deletedAt TEXT NULL
+      );
+      INSERT INTO clothing_items (
+        id, ownerId, category, name, subType, primaryColor, secondaryColors,
+        pattern, styleTags, seasons, description, photoUri, thumbnailUri,
+        cutoutUri, photoHash, createdAt, updatedAt, deletedAt
+      )
+      SELECT id, ownerId, category, name, subType, primaryColor, secondaryColors,
+        pattern, styleTags, seasons, description, photoUri, thumbnailUri,
+        cutoutUri, photoHash, createdAt, updatedAt, deletedAt
+      FROM clothing_items_legacy;
+      DROP TABLE clothing_items_legacy;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
   }
 
   await database.execAsync(`
