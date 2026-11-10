@@ -112,10 +112,22 @@ export function HomeScreen(props: Props) {
   const header = (
     <View style={styles.headerContent}>
       <View style={styles.topBar}>
-        <View>
-          <Text style={styles.eyebrow}>{t('home.eyebrow')}</Text>
-          <Text style={styles.title}>Outfit Combination</Text>
-        </View>
+        {props.account.user && analysisRemaining !== null && outfitRemaining !== null ? (
+          <View style={styles.tokenPill}>
+            <Text style={styles.tokenEyebrow}>{l('AI kredisi', 'AI credits')}</Text>
+            <Text style={styles.tokenValue}>✦ {analysisRemaining} · {outfitRemaining} 🪙</Text>
+          </View>
+        ) : props.account.enabled && !props.account.user ? (
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => void signIn()}
+            style={({ pressed }) => [styles.tokenPill, pressed && styles.pressed]}
+          >
+            <Text style={styles.tokenEyebrow}>{l('✦ AI ÖZELLİKLERİ', '✦ AI FEATURES')}</Text>
+            <Text style={styles.tokenValue}>{t('home.signIn')}</Text>
+          </Pressable>
+        ) : <View style={styles.tokenPillSpacer} />}
         <Pressable
           accessibilityLabel={t('home.profile')}
           accessibilityRole="button"
@@ -154,37 +166,7 @@ export function HomeScreen(props: Props) {
         />
       </View>
 
-      {props.account.enabled ? (
-        props.account.user ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={props.onSettings}
-            style={({ pressed }) => [styles.accountCard, pressed && styles.pressed]}
-          >
-            <View style={styles.accountCopy}>
-              <Text style={styles.accountEyebrow}>{t('home.account')}</Text>
-              <Text numberOfLines={1} style={styles.accountTitle}>
-                {t('home.hello', { name: props.account.user.displayName.split(/\s+/)[0] || props.account.user.displayName })}
-              </Text>
-              <Text style={styles.accountText}>
-                {analysisRemaining !== null && outfitRemaining !== null
-                  ? t('home.usage', { analysis: analysisRemaining, outfit: outfitRemaining })
-                  : t('home.accountDetails')}
-              </Text>
-            </View>
-            <Text style={styles.accountChevron}>›</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.signInCard}>
-            <View style={styles.accountCopy}>
-              <Text style={styles.accountEyebrow}>{l('✦ AI ÖZELLİKLERİ', '✦ AI FEATURES')}</Text>
-              <Text style={styles.accountTitle}>{t('home.guestBannerTitle')}</Text>
-              <Text style={styles.accountText}>{t('home.guestBannerText')}</Text>
-            </View>
-            <PrimaryButton title={t('home.signIn')} onPress={() => void signIn()} loading={accountBusy} />
-          </View>
-        )
-      ) : null}
+      {accountBusy ? null : null}
 
       {props.pendingDraft ? (
         <View style={styles.draftCard}>
@@ -326,9 +308,21 @@ const styles = StyleSheet.create({
   listContent: { alignSelf: 'center', paddingBottom: 48, gap: 12 },
   headerContent: { gap: spacing.lg, marginBottom: spacing.sm },
   gridRow: { gap: 12 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md },
-  eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
-  title: { color: colors.text, fontSize: 27, fontWeight: '900', marginTop: 3 },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md, gap: spacing.sm },
+  tokenPill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  tokenPillSpacer: { flex: 1 },
+  tokenEyebrow: { color: colors.muted, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase' },
+  tokenValue: { color: colors.text, fontSize: 13, fontWeight: '800' },
   profileButton: {
     width: 48,
     height: 48,
