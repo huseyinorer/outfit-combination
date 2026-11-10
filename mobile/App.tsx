@@ -789,6 +789,7 @@ export default function App() {
           onSignOut={disconnectAccount}
           onDeleteAccount={removeAccount}
           onRefreshAccount={refreshAccount}
+          onRefreshWardrobe={async () => { await reloadWardrobeState(); }}
           onGrantAiConsent={grantAiConsent}
           onRevokeAiConsent={revokeAiConsent}
           onDeleteAllData={deleteAllLocalData}

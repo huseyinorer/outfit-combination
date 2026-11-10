@@ -16,7 +16,9 @@ import { DangerButton, Field, Notice, PrimaryButton, ScreenHeader, SecondaryButt
 import { isSecureApiBaseUrl, isValidApiBaseUrl, normalizeApiBaseUrl } from '../domain/apiUrl';
 import { getApiHealth } from '../services/api';
 import type { AccountState } from '../services/accountAuth';
-import { exportWardrobe } from '../services/wardrobeExport';
+import { exportWardrobe, importWardrobe } from '../services/wardrobeExport';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Sharing from 'expo-sharing';
 import { useI18n } from '../locales';
 import {
   colors,
@@ -42,6 +44,7 @@ interface Props {
   onSignOut: () => Promise<void>;
   onDeleteAccount: () => Promise<void>;
   onRefreshAccount: () => void | Promise<void>;
+  onRefreshWardrobe?: () => void | Promise<void>;
   onGrantAiConsent: () => Promise<void>;
   onRevokeAiConsent: () => Promise<void>;
   onDeleteAllData: () => Promise<void>;
@@ -60,6 +63,7 @@ export function SettingsScreen(props: Props) {
   const [developerToolsOpen, setDeveloperToolsOpen] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [exportBusy, setExportBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const normalizedUrl = normalizeApiBaseUrl(url);
   const allowHttpApi = String(Constants.expoConfig?.extra?.appEnvironment ?? 'development') === 'development';
   const validUrl = isValidApiBaseUrl(url) && (allowHttpApi || isSecureApiBaseUrl(url));
@@ -115,14 +119,22 @@ export function SettingsScreen(props: Props) {
     try {
       const result = await exportWardrobe();
       try {
-        await Share.share({
-          title: l('Dolap aktarımı', 'Wardrobe export'),
-          message: l(
-            'Outfit Combination dolap aktarım dosyası',
-            'Outfit Combination wardrobe export file',
-          ),
-          url: result.fileUri,
-        });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(result.fileUri, {
+            mimeType: 'application/json',
+            UTI: 'public.json',
+            dialogTitle: l('Dolap aktarımını kaydet', 'Save wardrobe export'),
+          });
+        } else {
+          await Share.share({
+            title: l('Dolap aktarımı', 'Wardrobe export'),
+            message: l(
+              'Outfit Combination dolap aktarım dosyası',
+              'Outfit Combination wardrobe export file',
+            ),
+            url: result.fileUri,
+          });
+        }
       } catch {
         // Paylaşım iptal edildiyse sessiz geç; kullanıcı yolu zaten alert'te görür.
       }
@@ -141,6 +153,37 @@ export function SettingsScreen(props: Props) {
       );
     } finally {
       setExportBusy(false);
+    }
+  };
+
+  const importMyWardrobe = async () => {
+    if (importBusy) return;
+    try {
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', '*/*'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (pick.canceled || !pick.assets || pick.assets.length === 0) return;
+      const asset = pick.assets[0];
+      if (!asset) return;
+      setImportBusy(true);
+      const result = await importWardrobe(asset.uri);
+      await props.onRefreshWardrobe?.();
+      Alert.alert(
+        l('Dolap içe aktarıldı', 'Wardrobe imported'),
+        l(
+          `Eklenen parça: ${result.insertedClothing}\nAtlanan parça: ${result.skippedClothing}\nEklenen favori: ${result.insertedFavorites}\nAtlanan favori: ${result.skippedFavorites}`,
+          `Added items: ${result.insertedClothing}\nSkipped items: ${result.skippedClothing}\nAdded favorites: ${result.insertedFavorites}\nSkipped favorites: ${result.skippedFavorites}`,
+        ),
+      );
+    } catch (error) {
+      Alert.alert(
+        l('Dolap içe aktarılamadı', 'Import failed'),
+        error instanceof Error ? error.message : t('common.unknownError'),
+      );
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -382,6 +425,11 @@ export function SettingsScreen(props: Props) {
               loading={exportBusy}
             />
             <Text style={styles.deleteHint}>{t('settings.importText')}</Text>
+            <SecondaryButton
+              title={importBusy ? l('Geri yükleniyor…', 'Restoring…') : l('Dolap dosyasından geri yükle', 'Restore from export file')}
+              onPress={() => void importMyWardrobe()}
+              loading={importBusy}
+            />
           </View>
 
           <View style={styles.card}>
