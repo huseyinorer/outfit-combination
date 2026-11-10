@@ -127,8 +127,14 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" || { echo "ANDROID_KEYSTORE_BASE64 secret is empty"; exit 1; }
           echo "$KEYSTORE_B64" | base64 -d > release.keystore
           test -s release.keystore
+          echo "keystore size: $(stat --format=%s release.keystore) bytes"
+          echo "keystore sha256: $(sha256sum release.keystore | cut -d' ' -f1)"
+          file release.keystore || true
+          keytool -list -v -keystore release.keystore -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" | grep -E "Alias name|Certificate fingerprints|SHA1|SHA256" | head -20
       - name: Assemble release APK
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android

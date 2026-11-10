@@ -114,6 +114,9 @@ android {
                 storePassword storePasswordValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue
+                println "Release signing configured with keystore ${storeFilePath}, alias ${keyAliasValue}"
+            } else {
+                println "WARNING: ANDROID_KEYSTORE_FILE not set; release build will not be signed."
             }
         }
     }
@@ -122,9 +125,9 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Use the release signing config when a keystore file path is provided (CI);
-            // otherwise fall back to debug so local release builds still succeed.
-            signingConfig signingConfigs.release.storeFile ? signingConfigs.release : signingConfigs.debug
+            // Always use the release signing config so CI never silently falls back to the debug keystore.
+            // Local release builds need ANDROID_KEYSTORE_FILE (and friends) to be set; otherwise the build fails loud.
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
