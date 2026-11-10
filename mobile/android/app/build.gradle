@@ -145,6 +145,18 @@ android {
     }
 }
 
+// Expo / RN gradle plugins can mutate buildTypes.release.signingConfig after our block runs.
+// Reassert the release signingConfig after evaluation to make sure CI never ships a debug-signed APK.
+afterEvaluate {
+    android.buildTypes.each { bt ->
+        if (bt.name == "release") {
+            bt.signingConfig = android.signingConfigs.release
+            logger.lifecycle "afterEvaluate: release buildType signingConfig forced to signingConfigs.release " +
+                "(storeFile=${android.signingConfigs.release.storeFile?.absolutePath})"
+        }
+    }
+}
+
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
 // Accepts values in comma delimited lists, example:
 // android.packagingOptions.pickFirsts=/LICENSE,**/picasa.ini
