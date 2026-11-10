@@ -49,7 +49,6 @@ const config: ExpoConfig = {
   },
   plugins: [
     './plugins/with-outfit-theme.cjs',
-    'expo-updates',
     'expo-sqlite',
     [
       'expo-build-properties',
@@ -68,14 +67,6 @@ const config: ExpoConfig = {
       },
     ],
   ],
-  runtimeVersion: {
-    policy: 'appVersion',
-  },
-  updates: {
-    url: `https://u.expo.dev/${easProjectId}`,
-    checkAutomatically: 'ON_LOAD',
-    fallbackToCacheTimeout: 0,
-  },
   extra: {
     apiBaseUrl: process.env.EXPO_PUBLIC_API_URL ?? '',
     privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL

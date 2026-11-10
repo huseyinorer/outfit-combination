@@ -6,7 +6,7 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
+    "android": "expo run:android",
     "check:version": "node scripts/check-app-version.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-isolation=none src/domain/apiUrl.test.ts src/domain/correctionLearning.test.ts src/domain/outfitEngine.test.ts src/domain/version.test.ts",
@@ -23,7 +23,6 @@
     "expo-image-picker": "~58.0.10",
     "expo-sqlite": "~58.0.15",
     "expo-status-bar": "~58.0.0",
-    "expo-updates": "~58.0.21",
     "react": "19.3.0",
     "react-native": "0.88.1",
     "react-native-svg": "^15.16.0"
