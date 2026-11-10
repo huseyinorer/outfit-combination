@@ -120,7 +120,14 @@ jobs:
       - name: Regenerate Android native project
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile
-        run: npx expo prebuild --platform android --no-install --clean
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_APP_ENV: production
+          EXPO_PUBLIC_DIRECT_APK_UPDATES: "true"
+        run: |
+          test -n "$EXPO_PUBLIC_API_URL" || { echo "Repository variable EXPO_PUBLIC_API_URL is empty"; exit 1; }
+          echo "Building with API URL: $EXPO_PUBLIC_API_URL"
+          npx expo prebuild --platform android --no-install --clean
       - name: Decode release keystore
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android/app
@@ -152,6 +159,9 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_APP_ENV: production
+          EXPO_PUBLIC_DIRECT_APK_UPDATES: "true"
         run: ./gradlew assembleRelease --no-daemon --stacktrace
       - name: Print APK signer certificate
         if: steps.release.outputs.needs_build == 'true'
