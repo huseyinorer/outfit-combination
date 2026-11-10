@@ -114,9 +114,9 @@ android {
                 storePassword storePasswordValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue
-                println "Release signing configured with keystore ${storeFilePath}, alias ${keyAliasValue}"
+                logger.lifecycle "Release signing configured with keystore ${storeFilePath}, alias ${keyAliasValue}"
             } else {
-                println "WARNING: ANDROID_KEYSTORE_FILE not set; release build will not be signed."
+                logger.lifecycle "WARNING: ANDROID_KEYSTORE_FILE not set; release build will not be signed."
             }
         }
     }

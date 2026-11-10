@@ -135,6 +135,15 @@ jobs:
           echo "keystore sha256: $(sha256sum release.keystore | cut -d' ' -f1)"
           file release.keystore || true
           keytool -list -v -keystore release.keystore -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" | grep -E "Alias name|Certificate fingerprints|SHA1|SHA256" | head -20
+      - name: Print Gradle signing report
+        if: steps.release.outputs.needs_build == 'true'
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_FILE: release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:signingReport --no-daemon
       - name: Assemble release APK
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android
@@ -144,6 +153,13 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Print APK signer certificate
+        if: steps.release.outputs.needs_build == 'true'
+        working-directory: mobile/android
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk
       - name: Collect APK
         if: steps.release.outputs.needs_build == 'true'
         run: |
