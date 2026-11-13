@@ -14,7 +14,7 @@ import type {
 
 type ClothingRow = Omit<
   ClothingItem,
-  'secondaryColors' | 'styleTags' | 'seasons' | 'cutoutUri' | 'thumbnailUri'
+  'secondaryColors' | 'styleTags' | 'seasons' | 'cutoutUri' | 'thumbnailUri' | 'price' | 'currency'
 > & {
   secondaryColors: string;
   styleTags: string;
@@ -22,6 +22,8 @@ type ClothingRow = Omit<
   cutoutUri: string | null;
   thumbnailUri: string | null;
   photoHash: string | null;
+  price: number | null;
+  currency: string | null;
   deletedAt: string | null;
   ownerId: string;
 };
@@ -147,6 +149,8 @@ export async function initializeDatabase(): Promise<void> {
   if (!names.has('deletedAt')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN deletedAt TEXT NULL;');
   if (!names.has('ownerId')) await database.execAsync("ALTER TABLE clothing_items ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
   if (!names.has('photoHash')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN photoHash TEXT NULL;');
+  if (!names.has('price')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN price REAL NULL;');
+  if (!names.has('currency')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN currency TEXT NULL;');
 
   const favoriteColumns = new Set((await database.getAllAsync<{ name: string }>('PRAGMA table_info(favorite_outfits)')).map((column) => column.name));
   if (!favoriteColumns.has('ownerId')) await database.execAsync("ALTER TABLE favorite_outfits ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
@@ -237,6 +241,8 @@ const fromRow = (row: ClothingRow): ClothingItem => {
     secondaryColors: safeArray(row.secondaryColors),
     styleTags: safeArray(row.styleTags),
     seasons: safeArray(row.seasons),
+    price: row.price ?? null,
+    currency: row.currency ?? null,
   };
 };
 
@@ -345,8 +351,8 @@ export async function insertClothing(item: ClothingItem): Promise<void> {
   await database.runAsync(
     `INSERT INTO clothing_items (
       id, ownerId, category, name, subType, primaryColor, secondaryColors, pattern,
-      styleTags, seasons, description, photoUri, thumbnailUri, cutoutUri, photoHash, createdAt, updatedAt, deletedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      styleTags, seasons, description, photoUri, thumbnailUri, cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     item.id,
     activeOwnerId,
     item.category,
@@ -362,6 +368,8 @@ export async function insertClothing(item: ClothingItem): Promise<void> {
     item.thumbnailUri,
     item.cutoutUri,
     item.photoHash ?? null,
+    item.price ?? null,
+    item.currency ?? null,
     item.createdAt,
     item.updatedAt,
   );
@@ -373,7 +381,7 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
     `UPDATE clothing_items SET
       category = ?, name = ?, subType = ?, primaryColor = ?, secondaryColors = ?,
       pattern = ?, styleTags = ?, seasons = ?, description = ?, photoUri = ?,
-      thumbnailUri = ?, cutoutUri = ?, photoHash = ?, updatedAt = ? WHERE id = ? AND ownerId = ?`,
+      thumbnailUri = ?, cutoutUri = ?, photoHash = ?, price = ?, currency = ?, updatedAt = ? WHERE id = ? AND ownerId = ?`,
     item.category,
     item.name,
     item.subType,
@@ -387,6 +395,8 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
     item.thumbnailUri,
     item.cutoutUri,
     item.photoHash ?? null,
+    item.price ?? null,
+    item.currency ?? null,
     item.updatedAt,
     item.id,
     activeOwnerId,
@@ -728,6 +738,23 @@ export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedO
     ...entry,
     preferences: { destination, look, tone },
   }));
+}
+
+export async function countWornByClothing(): Promise<Map<string, number>> {
+  const database = await db();
+  const rows = await database.getAllAsync<{ clothingId: string; wears: number }>(
+    `SELECT clothingId, COUNT(*) AS wears FROM (
+       SELECT topId AS clothingId FROM worn_outfits WHERE ownerId = ?
+       UNION ALL SELECT bottomId FROM worn_outfits WHERE ownerId = ?
+       UNION ALL SELECT shoeId FROM worn_outfits WHERE ownerId = ?
+       UNION ALL SELECT hatId FROM worn_outfits WHERE ownerId = ? AND hatId IS NOT NULL
+       UNION ALL SELECT accessoryId FROM worn_outfits WHERE ownerId = ? AND accessoryId IS NOT NULL
+       UNION ALL SELECT outerwearId FROM worn_outfits WHERE ownerId = ? AND outerwearId IS NOT NULL
+     )
+     GROUP BY clothingId`,
+    activeOwnerId, activeOwnerId, activeOwnerId, activeOwnerId, activeOwnerId, activeOwnerId,
+  );
+  return new Map(rows.map((row) => [row.clothingId, row.wears]));
 }
 
 export async function clearAllUserData(): Promise<void> {

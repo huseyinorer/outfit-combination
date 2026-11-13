@@ -26,6 +26,9 @@ interface Props {
   onSignIn: () => Promise<void>;
   onFavorites: () => void;
   onHistory: () => void;
+  onStats: () => void;
+  onCalendar: () => void;
+  onPacking: () => void;
   favoriteCount: number;
   account: AccountState;
   onRefresh?: () => Promise<void>;
@@ -114,15 +117,22 @@ export function HomeScreen(props: Props) {
       <View style={styles.topBar}>
         {props.account.user && analysisRemaining !== null && outfitRemaining !== null ? (
           <View style={styles.tokenPill}>
-            <Text style={styles.tokenEyebrow}>{l('AI kredisi', 'AI credits')}</Text>
-            <Text style={styles.tokenValue}>✦ {analysisRemaining} · {outfitRemaining} 🪙</Text>
+            <View style={styles.tokenSlot}>
+              <Text style={styles.tokenSlotLabel}>{l('✦ Analiz', '✦ Analyze')}</Text>
+              <Text style={styles.tokenSlotValue}>{analysisRemaining}</Text>
+            </View>
+            <View style={styles.tokenDivider} />
+            <View style={styles.tokenSlot}>
+              <Text style={styles.tokenSlotLabel}>{l('🪙 Kombin', '🪙 Outfit')}</Text>
+              <Text style={styles.tokenSlotValue}>{outfitRemaining}</Text>
+            </View>
           </View>
         ) : props.account.enabled && !props.account.user ? (
           <Pressable
             accessibilityRole="button"
             hitSlop={8}
             onPress={() => void signIn()}
-            style={({ pressed }) => [styles.tokenPill, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.signInPill, pressed && styles.pressed]}
           >
             <Text style={styles.tokenEyebrow}>{l('✦ AI ÖZELLİKLERİ', '✦ AI FEATURES')}</Text>
             <Text style={styles.tokenValue}>{t('home.signIn')}</Text>
@@ -150,20 +160,24 @@ export function HomeScreen(props: Props) {
 
       <View style={styles.actions}>
         <Text style={styles.prompt}>{t('home.prompt')}</Text>
-        <ActionCard
-          variant="primary"
-          icon="sparkle"
-          title={t('home.recommend')}
-          hint={t('home.recommendHint')}
-          onPress={props.onRecommend}
-        />
-        <ActionCard
-          variant="secondary"
-          icon="plus"
-          title={t('home.add')}
-          hint={t('home.addHint')}
-          onPress={() => props.onAdd()}
-        />
+        <View style={styles.actionsRow}>
+          <ActionCard
+            variant="primary"
+            icon="sparkle"
+            layout="stack"
+            title={t('home.recommend')}
+            hint={t('home.recommendHint')}
+            onPress={props.onRecommend}
+          />
+          <ActionCard
+            variant="secondary"
+            icon="plus"
+            layout="stack"
+            title={t('home.add')}
+            hint={t('home.addHint')}
+            onPress={() => props.onAdd()}
+          />
+        </View>
       </View>
 
       {accountBusy ? null : null}
@@ -197,6 +211,21 @@ export function HomeScreen(props: Props) {
         <Text style={styles.readinessText}>
           {readyForOutfits ? t('home.ready') : t('home.missing')}
         </Text>
+      </View>
+
+      <View style={styles.toolsRow}>
+        <Pressable onPress={props.onStats} style={({ pressed }) => [styles.toolTile, pressed && styles.pressed]} accessibilityRole="button">
+          <Text style={styles.toolEmoji}>📊</Text>
+          <Text style={styles.toolLabel}>{l('İstatistik', 'Stats')}</Text>
+        </Pressable>
+        <Pressable onPress={props.onCalendar} style={({ pressed }) => [styles.toolTile, pressed && styles.pressed]} accessibilityRole="button">
+          <Text style={styles.toolEmoji}>📅</Text>
+          <Text style={styles.toolLabel}>{l('Takvim', 'Calendar')}</Text>
+        </Pressable>
+        <Pressable onPress={props.onPacking} style={({ pressed }) => [styles.toolTile, pressed && styles.pressed]} accessibilityRole="button">
+          <Text style={styles.toolEmoji}>🧳</Text>
+          <Text style={styles.toolLabel}>{l('Bavul', 'Packing')}</Text>
+        </Pressable>
       </View>
 
       <View style={styles.sectionHeader}>
@@ -317,10 +346,27 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  tokenPillSpacer: { flex: 1 },
+  signInPill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
     justifyContent: 'center',
     gap: 2,
   },
-  tokenPillSpacer: { flex: 1 },
+  tokenSlot: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 0 },
+  tokenSlotLabel: { color: colors.muted, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.4, textTransform: 'uppercase' },
+  tokenSlotValue: { color: colors.text, fontSize: 15, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  tokenDivider: { width: 1, height: 26, backgroundColor: colors.border },
   tokenEyebrow: { color: colors.muted, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase' },
   tokenValue: { color: colors.text, fontSize: 13, fontWeight: '800' },
   profileButton: {
@@ -341,6 +387,7 @@ const styles = StyleSheet.create({
   profileBody: { width: 20, height: 11, borderTopLeftRadius: 10, borderTopRightRadius: 10, backgroundColor: colors.primary },
   pressed: { opacity: 0.72 },
   actions: { gap: spacing.sm },
+  actionsRow: { flexDirection: 'row', gap: spacing.sm },
   prompt: { color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: 2 },
   actionButton: { width: '100%' },
   accountCard: {
@@ -386,6 +433,21 @@ const styles = StyleSheet.create({
   readinessCounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   readinessCount: { color: colors.text, fontSize: 14, fontWeight: '800' },
   readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
+  toolsRow: { flexDirection: 'row', gap: spacing.sm },
+  toolTile: {
+    flex: 1,
+    minHeight: 68,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingVertical: spacing.sm,
+  },
+  toolEmoji: { fontSize: 22 },
+  toolLabel: { color: colors.text, fontSize: 12, fontWeight: '800' },
   empty: { borderRadius: radius.lg, backgroundColor: colors.surface, padding: spacing.xl, gap: spacing.md, alignItems: 'center' },
   emptyIcon: { color: colors.primary, fontSize: 48 },
   emptyIconRow: { flexDirection: 'row', gap: 8, marginBottom: spacing.xs, flexWrap: 'wrap', justifyContent: 'center' },

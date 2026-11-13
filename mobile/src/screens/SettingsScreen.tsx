@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { getSetting, setSetting } from '../data/database';
+import { isBackgroundRemovalAvailable } from '../services/backgroundRemoval';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -64,6 +66,21 @@ export function SettingsScreen(props: Props) {
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [exportBusy, setExportBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
+  const [bgRemoval, setBgRemoval] = useState(false);
+  const bgAvailable = isBackgroundRemovalAvailable();
+
+  useEffect(() => {
+    void (async () => {
+      const value = await getSetting('bg_removal_enabled');
+      setBgRemoval(value === '1');
+    })();
+  }, []);
+
+  const toggleBgRemoval = async () => {
+    const next = !bgRemoval;
+    setBgRemoval(next);
+    await setSetting('bg_removal_enabled', next ? '1' : '0');
+  };
   const normalizedUrl = normalizeApiBaseUrl(url);
   const allowHttpApi = String(Constants.expoConfig?.extra?.appEnvironment ?? 'development') === 'development';
   const validUrl = isValidApiBaseUrl(url) && (allowHttpApi || isSecureApiBaseUrl(url));
@@ -415,6 +432,31 @@ export function SettingsScreen(props: Props) {
               )}
             </View>
           ) : null}
+
+          <View style={styles.card}>
+            <Text style={styles.title}>{l('Fotoğraf arka planı', 'Photo background')}</Text>
+            <Text style={styles.text}>
+              {l(
+                'Yeni kıyafet eklerken fotoğrafın arka planını cihazda otomatik kaldırır. Dolabın tutarlı görünür.',
+                'Removes the background of new clothing photos on-device, for a cleaner wardrobe look.',
+              )}
+            </Text>
+            {bgAvailable ? (
+              <SecondaryButton
+                title={bgRemoval
+                  ? l('Arka plan kaldırma: Açık · kapat', 'Background removal: On · turn off')
+                  : l('Arka plan kaldırmayı aç', 'Turn on background removal')}
+                onPress={() => void toggleBgRemoval()}
+              />
+            ) : (
+              <Text style={styles.deleteHint}>
+                {l(
+                  'Bu özellik native modül (@react-native-ml-kit/subject-segmentation) + prebuild gerektirir; henüz bu yapıya dahil değil.',
+                  'Requires the @react-native-ml-kit/subject-segmentation native module and a prebuild; not yet bundled.',
+                )}
+              </Text>
+            )}
+          </View>
 
           <View style={styles.card}>
             <Text style={styles.title}>{t('settings.export')}</Text>

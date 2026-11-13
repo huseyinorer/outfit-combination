@@ -1,11 +1,12 @@
 import { useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { hapticTick } from '../services/haptics';
 import { colors, radius, spacing } from '../theme/theme';
 
 type Variant = 'primary' | 'secondary';
 type Icon = 'sparkle' | 'plus';
+type Layout = 'row' | 'stack';
 
 interface Props {
   title: string;
@@ -15,9 +16,11 @@ interface Props {
   icon: Icon;
   accessibilityLabel?: string;
   disabled?: boolean;
+  layout?: Layout;
+  style?: ViewStyle;
 }
 
-export function ActionCard({ title, hint, onPress, variant = 'primary', icon, accessibilityLabel, disabled }: Props) {
+export function ActionCard({ title, hint, onPress, variant = 'primary', icon, accessibilityLabel, disabled, layout = 'row', style }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
   const pressIn = () => {
     hapticTick('light');
@@ -26,6 +29,7 @@ export function ActionCard({ title, hint, onPress, variant = 'primary', icon, ac
   const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5 }).start();
 
   const isPrimary = variant === 'primary';
+  const isStack = layout === 'stack';
   const bg = isPrimary ? colors.primary : colors.surface;
   const textColor = isPrimary ? colors.onPrimary : colors.text;
   const hintColor = isPrimary ? colors.onPrimary : colors.muted;
@@ -34,7 +38,7 @@ export function ActionCard({ title, hint, onPress, variant = 'primary', icon, ac
   const iconColor = isPrimary ? colors.onPrimary : colors.primary;
 
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View style={[{ transform: [{ scale }] }, isStack && styles.stackWrap, style]}>
       <Pressable
         onPress={onPress}
         onPressIn={pressIn}
@@ -43,28 +47,28 @@ export function ActionCard({ title, hint, onPress, variant = 'primary', icon, ac
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? title}
         style={[
-          styles.card,
+          isStack ? styles.cardStack : styles.card,
           { backgroundColor: bg, borderColor },
           disabled && styles.disabled,
         ]}
       >
-        <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>
-          <ActionIcon icon={icon} color={iconColor as string} />
+        <View style={[isStack ? styles.iconWrapStack : styles.iconWrap, { backgroundColor: iconBg }]}>
+          <ActionIcon icon={icon} color={iconColor as string} size={isStack ? 24 : 28} />
         </View>
-        <View style={styles.copy}>
-          <Text style={[styles.title, { color: textColor }]}>{title}</Text>
-          {hint ? <Text style={[styles.hint, { color: hintColor }]}>{hint}</Text> : null}
+        <View style={isStack ? styles.copyStack : styles.copy}>
+          <Text style={[isStack ? styles.titleStack : styles.title, { color: textColor }]}>{title}</Text>
+          {hint ? <Text style={[isStack ? styles.hintStack : styles.hint, { color: hintColor }]}>{hint}</Text> : null}
         </View>
-        <Text style={[styles.chevron, { color: textColor }]}>›</Text>
+        {!isStack ? <Text style={[styles.chevron, { color: textColor }]}>›</Text> : null}
       </Pressable>
     </Animated.View>
   );
 }
 
-function ActionIcon({ icon, color }: { icon: Icon; color: string }) {
+function ActionIcon({ icon, color, size = 28 }: { icon: Icon; color: string; size?: number }) {
   if (icon === 'sparkle') {
     return (
-      <Svg width={28} height={28} viewBox="0 0 32 32" fill="none">
+      <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
         <Path
           d="M16 3 L18.2 12.8 L28 14.5 L18.2 16.2 L16 26 L13.8 16.2 L4 14.5 L13.8 12.8 Z"
           fill={color}
@@ -75,7 +79,7 @@ function ActionIcon({ icon, color }: { icon: Icon; color: string }) {
     );
   }
   return (
-    <Svg width={28} height={28} viewBox="0 0 32 32" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
       <Path d="M16 6 L16 26 M6 16 L26 16" stroke={color} strokeWidth={3.2} strokeLinecap="round" />
     </Svg>
   );
@@ -92,6 +96,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minHeight: 72,
   },
+  cardStack: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    minHeight: 110,
+  },
+  stackWrap: { flex: 1 },
   iconWrap: {
     width: 48,
     height: 48,
@@ -99,9 +114,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconWrapStack: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   copy: { flex: 1, gap: 2 },
+  copyStack: { gap: 2 },
   title: { fontSize: 17, fontWeight: '900', letterSpacing: -0.1 },
+  titleStack: { fontSize: 15, fontWeight: '900', letterSpacing: -0.1 },
   hint: { fontSize: 12, lineHeight: 17 },
+  hintStack: { fontSize: 11, lineHeight: 15 },
   chevron: { fontSize: 28, fontWeight: '900', opacity: 0.6, marginRight: 4 },
   disabled: { opacity: 0.55 },
 });

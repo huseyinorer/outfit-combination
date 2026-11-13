@@ -32,6 +32,8 @@ export interface ClothingItem extends ClothingAttributes {
   thumbnailUri: string | null;
   cutoutUri: string | null;
   photoHash?: string | null;
+  price?: number | null;
+  currency?: string | null;
   createdAt: string;
   updatedAt: string;
 }

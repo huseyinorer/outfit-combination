@@ -31,6 +31,7 @@ import {
 import { analyzeClothing } from '../services/api';
 import { hapticTick } from '../services/haptics';
 import { createThumbnail, deleteStoredImage, finalizeImage, imageContentHash, prepareSelectedImage } from '../services/imageStorage';
+import { isBackgroundRemovalAvailable, removeBackground } from '../services/backgroundRemoval';
 import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
@@ -147,7 +148,7 @@ export function AddClothingScreen(props: Props) {
         || attributes.primaryColor !== aiAttributes.primaryColor
         || attributes.pattern !== aiAttributes.pattern,
       );
-      await persist({
+      const analyzed: ClothingDraft = {
         ...analyzingDraft,
         attributes,
         aiAttributes,
@@ -155,7 +156,11 @@ export function AddClothingScreen(props: Props) {
         detectedCategory: result.detectedCategory,
         analysisError: null,
         analysisMode: 'ai',
-      });
+      };
+      await persist(analyzed);
+      if (result.categoryConflict && result.detectedCategory && result.detectedCategory !== analyzed.category) {
+        promptCategoryConfirm(analyzed, result.detectedCategory);
+      }
     } catch (error) {
       if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : l('Analiz servisine ulaşılamadı.', 'The analysis service is unavailable.');
@@ -173,12 +178,55 @@ export function AddClothingScreen(props: Props) {
     await persist({ ...current, analysisMode: 'manual', analysisError: null });
   };
 
+  const applyDetectedCategory = async (current: ClothingDraft, detected: Category) => {
+    setCategory(detected);
+    await persist({
+      ...current,
+      category: detected,
+      categoryConflict: false,
+    });
+  };
+
+  const promptCategoryConfirm = (current: ClothingDraft, detected: Category) => {
+    const detectedLabel = categoryLabel(detected);
+    const currentLabel = categoryLabel(current.category);
+    Alert.alert(
+      l(`AI bunu "${detectedLabel}" olarak algıladı`, `AI detected this as "${detectedLabel}"`),
+      l(
+        `Sen "${currentLabel}" kategorisini seçmiştin. Kategoriyi "${detectedLabel}" olarak güncellemek ister misin? Diğer bilgiler korunur.`,
+        `You chose "${currentLabel}". Would you like to update the category to "${detectedLabel}"? Other details are kept.`,
+      ),
+      [
+        {
+          text: l(`Hayır, "${currentLabel}" kalsın`, `No, keep "${currentLabel}"`),
+          style: 'cancel',
+        },
+        {
+          text: l(`Evet, "${detectedLabel}" olarak güncelle`, `Yes, update to "${detectedLabel}"`),
+          onPress: () => { void applyDetectedCategory(current, detected); },
+        },
+      ],
+    );
+  };
+
   const acceptAsset = async (uri: string) => {
     if (!category) return;
     setBusy(true);
     try {
       const id = draft?.id ?? Crypto.randomUUID();
-      const photoUri = await prepareSelectedImage(uri, id);
+      let photoUri = await prepareSelectedImage(uri, id);
+      const bgEnabled = (await getSetting('bg_removal_enabled')) === '1';
+      if (bgEnabled && isBackgroundRemovalAvailable()) {
+        try {
+          const bgResult = await removeBackground(photoUri);
+          if (bgResult.usedNativeModule && bgResult.resultUri !== photoUri) {
+            deleteStoredImage(photoUri);
+            photoUri = bgResult.resultUri;
+          }
+        } catch {
+          // Fall back to the original photo on any segmenter error.
+        }
+      }
       const photoHash = imageContentHash(photoUri);
       const duplicate = photoHash ? await findClothingByPhotoHash(photoHash) : null;
       if (duplicate) {
@@ -468,10 +516,22 @@ export function AddClothingScreen(props: Props) {
                     </View>
                   </View>
                 ) : null}
-                {draft.categoryConflict ? (
-                  <Notice tone="error">
-                    {l(`Model bu parçayı ${draft.detectedCategory ? categoryLabel(draft.detectedCategory) : 'farklı bir kategori'} olarak algıladı. Seçtiğin kategoriyi kontrol et.`, `The model detected this as ${draft.detectedCategory ? categoryLabel(draft.detectedCategory) : 'a different category'}. Check your selected category.`)}
-                  </Notice>
+                {draft.categoryConflict && draft.detectedCategory ? (
+                  <View style={styles.conflictBox}>
+                    <Text style={styles.conflictText}>
+                      {l(
+                        `AI bu parçayı "${categoryLabel(draft.detectedCategory)}" olarak algıladı; sen "${categoryLabel(draft.category)}" seçtin.`,
+                        `AI detected this as "${categoryLabel(draft.detectedCategory)}" but you chose "${categoryLabel(draft.category)}".`,
+                      )}
+                    </Text>
+                    <View style={styles.conflictActions}>
+                      <SecondaryButton
+                        title={l(`"${categoryLabel(draft.detectedCategory)}" olarak güncelle`, `Update to "${categoryLabel(draft.detectedCategory)}"`)}
+                        onPress={() => void applyDetectedCategory(draft, draft.detectedCategory as Category)}
+                        style={styles.conflictButton}
+                      />
+                    </View>
+                  </View>
                 ) : null}
                 {learnedApplied ? <Notice>{l('Önceki düzeltmelerine göre bazı alanlar telefonda otomatik düzeltildi.', 'Some fields were corrected on your phone using your previous edits.')}</Notice> : null}
                 {draft.analysisError ? <Notice tone="error">{draft.analysisError}</Notice> : null}
@@ -601,5 +661,16 @@ const styles = StyleSheet.create({
   footerButton: { flex: 1 },
   storageNote: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   creditNote: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: '900', textAlign: 'center' },
+  conflictBox: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningSoft,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    gap: spacing.sm,
+  },
+  conflictText: { color: colors.text, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  conflictActions: { flexDirection: 'row', gap: spacing.sm },
+  conflictButton: { flex: 1 },
 });
 

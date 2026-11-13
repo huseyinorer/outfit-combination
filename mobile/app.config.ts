@@ -17,6 +17,7 @@ const config: ExpoConfig = {
     permissions: [
       'CAMERA',
       'READ_MEDIA_IMAGES',
+      'ACCESS_COARSE_LOCATION',
       ...(directApkUpdatesEnabled ? ['android.permission.REQUEST_INSTALL_PACKAGES'] : []),
     ],
     softwareKeyboardLayoutMode: 'resize',
@@ -36,6 +37,8 @@ const config: ExpoConfig = {
         'Kıyafet eklemek için galeri erişimi gerekir. / Photo library access is required to add clothing.',
       NSPhotoLibraryAddUsageDescription:
         'Kombin kartlarını kaydetmek için galeriye yazma izni gerekir. / Write access is required to save outfit cards to your library.',
+      NSLocationWhenInUseUsageDescription:
+        'Bugünün havasına göre kombin önermek için konumuna ihtiyaç duyarız; yalnızca cihazında filtreleme için kullanılır. / Location is used only on-device to filter outfit suggestions by today\'s weather.',
       ITSAppUsesNonExemptEncryption: false,
       CFBundleAllowMixedLocalizations: true,
       CFBundleLocalizations: ['tr', 'en'],
@@ -64,6 +67,13 @@ const config: ExpoConfig = {
         photosPermission: 'Kıyafet eklemek için galeri erişimi gerekir. / Photo library access is required to add clothing.',
         cameraPermission: 'Kıyafet fotoğrafı çekmek için kamera erişimi gerekir. / Camera access is required to photograph clothing.',
         microphonePermission: false,
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationAlwaysAndWhenInUsePermission:
+          'Bugünün havasına göre kombin önermek için konumuna ihtiyaç duyarız; yalnızca cihazında filtreleme için kullanılır. / Location is used only on-device to filter outfit suggestions by today\'s weather.',
       },
     ],
   ],
