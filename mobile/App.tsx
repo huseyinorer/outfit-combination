@@ -85,6 +85,9 @@ import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
+import { StatsScreen } from './src/screens/StatsScreen';
+import { PackingScreen } from './src/screens/PackingScreen';
+import { CalendarScreen } from './src/screens/CalendarScreen';
 import {
   applyThemePreference,
   colors,
@@ -101,6 +104,9 @@ type Screen =
   | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history' }
   | { name: 'favorites' }
   | { name: 'history' }
+  | { name: 'stats' }
+  | { name: 'calendar' }
+  | { name: 'packing' }
   | { name: 'settings' }
   | { name: 'privacy'; returnTo?: 'auth' | 'settings'; authReturnTo?: 'home' | 'settings'; document?: 'privacy' | 'terms' }
   | { name: 'onboarding' };
@@ -773,6 +779,15 @@ export default function App() {
         />
       );
       break;
+    case 'stats':
+      content = <StatsScreen items={items} onBack={goBack} />;
+      break;
+    case 'calendar':
+      content = <CalendarScreen items={items} onBack={goBack} />;
+      break;
+    case 'packing':
+      content = <PackingScreen items={items} onBack={goBack} />;
+      break;
     case 'settings':
       content = (
         <SettingsScreen
@@ -821,6 +836,9 @@ export default function App() {
           onSignIn={async () => setScreen({ name: 'auth', returnTo: 'home' })}
           onFavorites={() => setScreen({ name: 'favorites' })}
           onHistory={() => setScreen({ name: 'history' })}
+          onStats={() => setScreen({ name: 'stats' })}
+          onCalendar={() => setScreen({ name: 'calendar' })}
+          onPacking={() => setScreen({ name: 'packing' })}
           favoriteCount={favorites.length}
           account={account}
           onRefresh={async () => { await reloadWardrobeState(); await refreshAccount(); }}

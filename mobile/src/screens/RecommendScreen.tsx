@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { completeSuggestions, getMissingCategories } from '../domain/outfitEngine';
@@ -16,6 +16,7 @@ import { requestOutfits } from '../services/api';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 import { getSetting, listDislikedOutfitKeys, setSetting } from '../data/database';
+import { getCachedWeather, loadFreshWeather, matchesWeather, type WeatherSnapshot } from '../services/weather';
 
 interface Props {
   items: ClothingItem[];
@@ -89,10 +90,51 @@ export function RecommendScreen(props: Props) {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const missing = useMemo(() => getMissingCategories(props.items), [props.items]);
+  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [weatherBusy, setWeatherBusy] = useState(false);
+  const [weatherFilter, setWeatherFilter] = useState(false);
+  const weatherAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const stored = await getSetting('weather_filter_enabled');
+      if (stored === '1') setWeatherFilter(true);
+      const cached = await getCachedWeather();
+      if (cached) setWeather(cached);
+    })();
+    return () => weatherAbortRef.current?.abort();
+  }, []);
+
+  const refreshWeather = async () => {
+    weatherAbortRef.current?.abort();
+    const controller = new AbortController();
+    weatherAbortRef.current = controller;
+    setWeatherBusy(true);
+    try {
+      const snapshot = await loadFreshWeather(controller.signal);
+      if (!controller.signal.aborted) setWeather(snapshot);
+    } finally {
+      if (weatherAbortRef.current === controller) weatherAbortRef.current = null;
+      setWeatherBusy(false);
+    }
+  };
+
+  const toggleWeatherFilter = async () => {
+    const next = !weatherFilter;
+    setWeatherFilter(next);
+    await setSetting('weather_filter_enabled', next ? '1' : '0');
+    if (next && !weather) void refreshWeather();
+  };
+
+  const filteredItems = useMemo(() => {
+    if (!weatherFilter || !weather) return props.items;
+    return props.items.filter((item) => matchesWeather(item.seasons, weather));
+  }, [props.items, weather, weatherFilter]);
+
+  const missing = useMemo(() => getMissingCategories(filteredItems), [filteredItems]);
   const availableExtras = useMemo<OptionalCategory[]>(
-    () => OPTIONAL_CATEGORIES.filter((category) => props.items.some((item) => item.category === category)),
-    [props.items],
+    () => OPTIONAL_CATEGORIES.filter((category) => filteredItems.some((item) => item.category === category)),
+    [filteredItems],
   );
   const extraModeLabels: Record<'auto' | 'include' | 'exclude', string> = {
     auto: l('Otomatik', 'Auto'),
@@ -105,10 +147,10 @@ export function RecommendScreen(props: Props) {
     exclude: l('Bu öneride dışarıda bırakılır.', 'Left out of this outfit.'),
   };
   const countByCategory = useMemo<Record<OptionalCategory, number>>(() => ({
-    hat: props.items.filter((item) => item.category === 'hat').length,
-    accessory: props.items.filter((item) => item.category === 'accessory').length,
-    outerwear: props.items.filter((item) => item.category === 'outerwear').length,
-  }), [props.items]);
+    hat: filteredItems.filter((item) => item.category === 'hat').length,
+    accessory: filteredItems.filter((item) => item.category === 'accessory').length,
+    outerwear: filteredItems.filter((item) => item.category === 'outerwear').length,
+  }), [filteredItems]);
   const wide = width >= 900;
 
   useEffect(() => {
@@ -124,8 +166,10 @@ export function RecommendScreen(props: Props) {
     try {
       const excluded = await listDislikedOutfitKeys();
       await props.onResults(
-        completeSuggestions(props.items, preferences, [], excluded, extras),
-        l('Hızlı Kombin ile ücretsiz seçenekler hazırlandı.', 'Free options were created with Quick Outfits.'),
+        completeSuggestions(filteredItems, preferences, [], excluded, extras),
+        weatherFilter && weather
+          ? l(`Hızlı Kombin · bugünün havasına (${Math.round(weather.temperatureC)}°C) uygun parçalardan.`, `Quick Outfits · from items matching today's weather (${Math.round(weather.temperatureC)}°C).`)
+          : l('Hızlı Kombin ile ücretsiz seçenekler hazırlandı.', 'Free options were created with Quick Outfits.'),
         preferences,
       );
     } finally {
@@ -144,8 +188,8 @@ export function RecommendScreen(props: Props) {
         return;
       }
       try {
-        const response = await requestOutfits(props.apiUrl, preferences, props.items, language, extras);
-        const checked = completeSuggestions(props.items, preferences, response.suggestions, await listDislikedOutfitKeys(), extras);
+        const response = await requestOutfits(props.apiUrl, preferences, filteredItems, language, extras);
+        const checked = completeSuggestions(filteredItems, preferences, response.suggestions, await listDislikedOutfitKeys(), extras);
         const mobileCompleted = checked.some((x) => x.source === 'local');
         await props.onResults(
           checked,
@@ -153,7 +197,7 @@ export function RecommendScreen(props: Props) {
           preferences,
         );
       } catch {
-        const local = completeSuggestions(props.items, preferences, [], await listDislikedOutfitKeys(), extras);
+        const local = completeSuggestions(filteredItems, preferences, [], await listDislikedOutfitKeys(), extras);
         await props.onResults(
           local,
           l('AI şu anda yanıt vermiyor. Beklememen için Hızlı Kombin seçenekleri hazırlandı.', 'AI is not responding right now. Quick Outfits were prepared so you do not have to wait.'),
@@ -183,6 +227,16 @@ export function RecommendScreen(props: Props) {
             </View>
           ) : (
             <>
+              <WeatherCard
+                weather={weather}
+                enabled={weatherFilter}
+                busy={weatherBusy}
+                onToggle={() => void toggleWeatherFilter()}
+                onRefresh={() => void refreshWeather()}
+                filteredCount={filteredItems.length}
+                totalCount={props.items.length}
+                language={language}
+              />
               <Text style={styles.lead}>{l('Üç kısa seçim yap; dolabındaki gerçek parçalardan seçenekler hazırlayalım.', 'Make three quick choices and we will use real items from your wardrobe.')}</Text>
               <View style={[styles.questions, wide && styles.questionsWide]}>
                 {questions.map((question, index) => (
@@ -282,6 +336,95 @@ export function RecommendScreen(props: Props) {
   );
 }
 
+function seasonLabel(season: WeatherSnapshot['season'], language: string): string {
+  const map = language === 'tr'
+    ? { summer: 'yaz parçaları', autumn: 'geçiş parçaları', winter: 'kış parçaları', spring: 'ilkbahar parçaları' }
+    : { summer: 'summer items', autumn: 'transitional items', winter: 'winter items', spring: 'spring items' };
+  return map[season];
+}
+
+function weatherEmoji(season: WeatherSnapshot['season'], raining: boolean): string {
+  if (raining) return '🌧️';
+  if (season === 'summer') return '☀️';
+  if (season === 'winter') return '❄️';
+  if (season === 'autumn') return '🍂';
+  return '🌤️';
+}
+
+interface WeatherCardProps {
+  weather: WeatherSnapshot | null;
+  enabled: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onRefresh: () => void;
+  filteredCount: number;
+  totalCount: number;
+  language: string;
+}
+
+function WeatherCard({ weather, enabled, busy, onToggle, onRefresh, filteredCount, totalCount, language }: WeatherCardProps) {
+  const l = (tr: string, en: string) => language === 'tr' ? tr : en;
+  const hiddenCount = Math.max(0, totalCount - filteredCount);
+
+  return (
+    <View style={[styles.weatherCard, enabled && styles.weatherCardOn]}>
+      <View style={styles.weatherTop}>
+        <View style={styles.weatherLeft}>
+          <Text style={styles.weatherEmoji}>
+            {weather ? weatherEmoji(weather.season, weather.isRaining) : '🌍'}
+          </Text>
+          <View style={styles.weatherTextCol}>
+            {busy ? (
+              <View style={styles.weatherBusyRow}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={styles.weatherTitle}>{l('Hava durumu alınıyor…', 'Fetching weather…')}</Text>
+              </View>
+            ) : weather ? (
+              <>
+                <Text style={styles.weatherTitle}>
+                  {Math.round(weather.temperatureC)}°C
+                  {weather.locationLabel ? ` · ${weather.locationLabel}` : ''}
+                </Text>
+                <Text style={styles.weatherSub}>
+                  {enabled
+                    ? l(`${seasonLabel(weather.season, language)} öneriliyor`, `recommending ${seasonLabel(weather.season, language)}`)
+                    : l('Hava durumuna göre filtrelemek için aç', 'Turn on to filter by weather')}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.weatherTitle}>{l('Bugünün havasına göre filtrele', 'Filter by today\'s weather')}</Text>
+                <Text style={styles.weatherSub}>
+                  {l('Konum izni ister, sadece filtre için kullanılır.', 'Asks for location, only used for filtering.')}
+                </Text>
+              </>
+            )}
+          </View>
+        </View>
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: enabled }}
+          style={[styles.toggleTrack, enabled && styles.toggleTrackOn]}
+          hitSlop={8}
+        >
+          <View style={[styles.toggleThumb, enabled && styles.toggleThumbOn]} />
+        </Pressable>
+      </View>
+      {enabled && weather && hiddenCount > 0 ? (
+        <Text style={styles.weatherHidden}>
+          {l(`Bu havaya uymadığı için ${hiddenCount} parça hariç tutuldu.`, `${hiddenCount} items were hidden as they do not match this weather.`)}
+        </Text>
+      ) : null}
+      {enabled && weather ? (
+        <Pressable onPress={onRefresh} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.weatherRefresh}>{l('Hava durumunu yenile', 'Refresh weather')}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   scrollContent: { paddingBottom: 32 },
@@ -316,4 +459,36 @@ const styles = StyleSheet.create({
   privacy: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   credit: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: '900', textAlign: 'center' },
   footerButton: { flex: 1 },
+  weatherCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  weatherCardOn: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  weatherTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  weatherLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  weatherEmoji: { fontSize: 30 },
+  weatherTextCol: { flex: 1, gap: 2 },
+  weatherTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  weatherSub: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  weatherBusyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  weatherHidden: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  weatherRefresh: { color: colors.primary, fontSize: 12, fontWeight: '800', alignSelf: 'flex-start' },
+  toggleTrack: {
+    width: 46, height: 28, borderRadius: 14,
+    backgroundColor: colors.border,
+    padding: 2, justifyContent: 'center',
+  },
+  toggleTrackOn: { backgroundColor: colors.primary },
+  toggleThumb: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  toggleThumbOn: { alignSelf: 'flex-end' },
 });

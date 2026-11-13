@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -13,10 +13,11 @@ import {
 } from 'react-native';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
-import { DangerButton, PrimaryButton, ScreenHeader } from '../components/ui';
+import { DangerButton, Field, PrimaryButton, ScreenHeader } from '../components/ui';
 import type { ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
+import { countWornByClothing } from '../data/database';
 
 export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
   item: ClothingItem;
@@ -38,13 +39,37 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
     description: item.description,
   });
   const [busy, setBusy] = useState(false);
+  const [priceText, setPriceText] = useState<string>(item.price != null ? String(item.price) : '');
+  const [currency, setCurrency] = useState<string>(item.currency ?? (language === 'tr' ? 'TL' : 'USD'));
+  const [wearCount, setWearCount] = useState<number>(0);
   const wide = width >= 900;
+
+  useEffect(() => {
+    void (async () => {
+      const counts = await countWornByClothing();
+      setWearCount(counts.get(item.id) ?? 0);
+    })();
+  }, [item.id]);
+
+  const parsedPrice = (() => {
+    const cleaned = priceText.replace(',', '.').trim();
+    if (!cleaned) return null;
+    const value = Number(cleaned);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  })();
+  const costPerWear = parsedPrice != null && wearCount > 0 ? parsedPrice / wearCount : null;
 
   const save = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await onSave({ ...item, ...attributes, updatedAt: new Date().toISOString() });
+      await onSave({
+        ...item,
+        ...attributes,
+        price: parsedPrice,
+        currency: parsedPrice != null ? currency.trim() || null : null,
+        updatedAt: new Date().toISOString(),
+      });
     } catch (error) {
       Alert.alert(l('Kaydedilemedi', 'Could not save'), error instanceof Error ? error.message : t('common.unknownError'));
       setBusy(false);
@@ -102,6 +127,47 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
           </View>
           <View style={styles.formColumn}>
             <ClothingForm value={attributes} onChange={setAttributes} />
+            <View style={styles.priceSection}>
+              <Text style={styles.priceHeading}>{l('Fiyat ve giyim başı maliyet', 'Price and cost-per-wear')}</Text>
+              <View style={styles.priceRow}>
+                <View style={styles.priceField}>
+                  <Field
+                    label={l('Fiyat (opsiyonel)', 'Price (optional)')}
+                    value={priceText}
+                    onChangeText={setPriceText}
+                    placeholder={l('ör. 450', 'e.g. 45')}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={styles.currencyField}>
+                  <Field
+                    label={l('Para', 'Currency')}
+                    value={currency}
+                    onChangeText={setCurrency}
+                    placeholder="TL"
+                  />
+                </View>
+              </View>
+              <View style={styles.statRow}>
+                <View style={styles.statCell}>
+                  <Text style={styles.statLabel}>{l('Toplam giyim', 'Total wears')}</Text>
+                  <Text style={styles.statValue}>{wearCount}</Text>
+                </View>
+                <View style={styles.statCell}>
+                  <Text style={styles.statLabel}>{l('Giyim başı', 'Per wear')}</Text>
+                  <Text style={styles.statValue}>
+                    {costPerWear != null
+                      ? `${costPerWear.toFixed(2)} ${currency.trim() || (language === 'tr' ? 'TL' : 'USD')}`
+                      : '—'}
+                  </Text>
+                </View>
+              </View>
+              {parsedPrice != null && wearCount === 0 ? (
+                <Text style={styles.priceHint}>
+                  {l('Henüz giyilmemiş. Kombinde "Bugün giydim" basıldıkça giyim başı maliyet düşer.', 'Not worn yet. Tap "Wore today" on an outfit and this will drop.')}
+                </Text>
+              ) : null}
+            </View>
           </View>
         </ContentFrame>
       </ScrollView>
@@ -129,4 +195,22 @@ const styles = StyleSheet.create({
   footerSave: { flex: 1 },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.7 },
+  priceSection: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    gap: spacing.sm,
+  },
+  priceHeading: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  priceRow: { flexDirection: 'row', gap: spacing.sm },
+  priceField: { flex: 2 },
+  currencyField: { flex: 1 },
+  statRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
+  statCell: { flex: 1, padding: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
+  statLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
+  statValue: { color: colors.text, fontSize: 18, fontWeight: '900', marginTop: 2 },
+  priceHint: { color: colors.muted, fontSize: 12, lineHeight: 17 },
 });
