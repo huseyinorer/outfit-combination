@@ -165,7 +165,9 @@ export async function initializeDatabase(): Promise<void> {
   }
 
   // Drop the legacy CHECK(category IN ('top','bottom','shoes')) by rebuilding the table.
-  // This is a no-op once the constraint is gone.
+  // Build the new table under a temporary name and rename it into place: renaming the *old*
+  // table would make SQLite rewrite the foreign keys of favorite_outfits/suggestion_history
+  // to point at the temporary name, which then disappears.
   const legacy = await database.getFirstAsync<{ sql: string | null }>(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='clothing_items'",
   );
@@ -173,8 +175,8 @@ export async function initializeDatabase(): Promise<void> {
     await database.execAsync(`
       PRAGMA foreign_keys = OFF;
       BEGIN TRANSACTION;
-      ALTER TABLE clothing_items RENAME TO clothing_items_legacy;
-      CREATE TABLE clothing_items (
+      DROP TABLE IF EXISTS clothing_items_rebuild;
+      CREATE TABLE clothing_items_rebuild (
         id TEXT PRIMARY KEY NOT NULL,
         ownerId TEXT NOT NULL DEFAULT 'local',
         category TEXT NOT NULL,
@@ -190,24 +192,29 @@ export async function initializeDatabase(): Promise<void> {
         thumbnailUri TEXT NULL,
         cutoutUri TEXT NULL,
         photoHash TEXT NULL,
+        price REAL NULL,
+        currency TEXT NULL,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
         deletedAt TEXT NULL
       );
-      INSERT INTO clothing_items (
+      INSERT INTO clothing_items_rebuild (
         id, ownerId, category, name, subType, primaryColor, secondaryColors,
         pattern, styleTags, seasons, description, photoUri, thumbnailUri,
-        cutoutUri, photoHash, createdAt, updatedAt, deletedAt
+        cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
       )
       SELECT id, ownerId, category, name, subType, primaryColor, secondaryColors,
         pattern, styleTags, seasons, description, photoUri, thumbnailUri,
-        cutoutUri, photoHash, createdAt, updatedAt, deletedAt
-      FROM clothing_items_legacy;
-      DROP TABLE clothing_items_legacy;
+        cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
+      FROM clothing_items;
+      DROP TABLE clothing_items;
+      ALTER TABLE clothing_items_rebuild RENAME TO clothing_items;
       COMMIT;
       PRAGMA foreign_keys = ON;
     `);
   }
+
+  await repairLegacyForeignKeys(database);
 
   await database.execAsync(`
     DROP INDEX IF EXISTS idx_clothing_category;
@@ -223,6 +230,83 @@ export async function initializeDatabase(): Promise<void> {
       SELECT 'pending_queue:local', value FROM app_settings WHERE key = 'pending_queue';
     DELETE FROM app_settings WHERE key IN ('pending_draft', 'pending_queue');
   `);
+}
+
+const FK_REPAIR_TABLES: Record<'favorite_outfits' | 'suggestion_history', {
+  create: (name: string) => string;
+  columns: string;
+  indexes: string;
+}> = {
+  favorite_outfits: {
+    create: (name) => `CREATE TABLE ${name} (
+      id TEXT PRIMARY KEY NOT NULL,
+      ownerId TEXT NOT NULL DEFAULT 'local',
+      title TEXT NOT NULL,
+      topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      source TEXT NULL,
+      createdAt TEXT NOT NULL,
+      UNIQUE(topId, bottomId, shoeId)
+    );`,
+    columns: 'id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, createdAt',
+    indexes: `CREATE INDEX IF NOT EXISTS idx_favorite_created ON favorite_outfits(createdAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_favorite_owner_created ON favorite_outfits(ownerId, createdAt DESC);`,
+  },
+  suggestion_history: {
+    create: (name) => `CREATE TABLE ${name} (
+      id TEXT PRIMARY KEY NOT NULL,
+      batchId TEXT NOT NULL,
+      ownerId TEXT NOT NULL,
+      title TEXT NOT NULL,
+      topId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      bottomId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      shoeId TEXT NOT NULL REFERENCES clothing_items(id) ON DELETE CASCADE,
+      hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      source TEXT NULL,
+      destination TEXT NOT NULL,
+      look TEXT NOT NULL,
+      tone TEXT NOT NULL,
+      suggestedAt TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );`,
+    columns: 'id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, destination, look, tone, suggestedAt, position',
+    indexes: `CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_date ON suggestion_history(ownerId, suggestedAt DESC, position ASC);
+      CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_batch ON suggestion_history(ownerId, batchId);`,
+  },
+};
+
+// The v1.4.6 migration renamed clothing_items away, which made SQLite repoint these tables'
+// foreign keys at clothing_items_legacy before that table was dropped. Rebuild them so every
+// insert stops failing with "no such table: main.clothing_items_legacy".
+async function repairLegacyForeignKeys(database: SQLite.SQLiteDatabase): Promise<void> {
+  const broken = await database.getAllAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE '%clothing_items_legacy%'",
+  );
+  for (const { name } of broken) {
+    if (name !== 'favorite_outfits' && name !== 'suggestion_history') continue;
+    const spec = FK_REPAIR_TABLES[name];
+    const temp = `${name}_repair`;
+    await database.execAsync(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN TRANSACTION;
+      DROP TABLE IF EXISTS ${temp};
+      ${spec.create(temp)}
+      INSERT INTO ${temp} (${spec.columns}) SELECT ${spec.columns} FROM ${name};
+      DROP TABLE ${name};
+      ALTER TABLE ${temp} RENAME TO ${name};
+      ${spec.indexes}
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+  }
 }
 
 const safeArray = (value: string): string[] => {
