@@ -100,7 +100,21 @@ export function RecommendScreen(props: Props) {
       const stored = await getSetting('weather_filter_enabled');
       if (stored === '1') setWeatherFilter(true);
       const cached = await getCachedWeather();
-      if (cached) setWeather(cached);
+      if (cached) {
+        setWeather(cached);
+      } else {
+        weatherAbortRef.current?.abort();
+        const controller = new AbortController();
+        weatherAbortRef.current = controller;
+        setWeatherBusy(true);
+        try {
+          const snapshot = await loadFreshWeather(controller.signal);
+          if (!controller.signal.aborted) setWeather(snapshot);
+        } finally {
+          if (weatherAbortRef.current === controller) weatherAbortRef.current = null;
+          setWeatherBusy(false);
+        }
+      }
     })();
     return () => weatherAbortRef.current?.abort();
   }, []);
@@ -215,6 +229,16 @@ export function RecommendScreen(props: Props) {
       <ScreenHeader title={t('home.recommend')} onBack={props.onBack} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <ContentFrame maxWidth={1120} style={styles.content}>
+          <WeatherCard
+            weather={weather}
+            enabled={weatherFilter}
+            busy={weatherBusy}
+            onToggle={() => void toggleWeatherFilter()}
+            onRefresh={() => void refreshWeather()}
+            filteredCount={filteredItems.length}
+            totalCount={props.items.length}
+            language={language}
+          />
           {missing.length > 0 ? (
             <View style={styles.missingCard}>
               <Text style={styles.missingTitle}>{l('Önce dolabını tamamlayalım', 'Complete your wardrobe first')}</Text>
@@ -227,16 +251,6 @@ export function RecommendScreen(props: Props) {
             </View>
           ) : (
             <>
-              <WeatherCard
-                weather={weather}
-                enabled={weatherFilter}
-                busy={weatherBusy}
-                onToggle={() => void toggleWeatherFilter()}
-                onRefresh={() => void refreshWeather()}
-                filteredCount={filteredItems.length}
-                totalCount={props.items.length}
-                language={language}
-              />
               <Text style={styles.lead}>{l('Üç kısa seçim yap; dolabındaki gerçek parçalardan seçenekler hazırlayalım.', 'Make three quick choices and we will use real items from your wardrobe.')}</Text>
               <View style={[styles.questions, wide && styles.questionsWide]}>
                 {questions.map((question, index) => (

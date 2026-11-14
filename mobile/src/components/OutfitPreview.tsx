@@ -1,6 +1,7 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 import type { ClothingItem, Category } from '../domain/types';
-import { colors, radius, spacing } from '../theme/theme';
+import { CategoryIcon } from './CategoryIcon';
+import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
 type OptionalCategory = 'hat' | 'accessory' | 'outerwear';
@@ -17,91 +18,12 @@ interface Props {
   onSwapExtra?: (category: OptionalCategory) => void;
 }
 
-function BoardPiece({ item, large = false, onPress }: {
-  item: ClothingItem;
-  large?: boolean;
-  onPress?: (item: ClothingItem) => void;
-}) {
-  const { language } = useI18n();
-  return (
-    <Pressable
-      accessibilityRole="imagebutton"
-      accessibilityLabel={language === 'tr' ? `${item.name || item.subType} fotoğrafını büyüt` : `Enlarge ${item.name || item.subType} photo`}
-      onPress={() => onPress?.(item)}
-      style={({ pressed }) => [styles.boardPiece, large && styles.boardPieceLarge, pressed && styles.pressed]}
-    >
-      <Image source={{ uri: item.photoUri }} style={styles.boardImage} resizeMode="contain" />
-      <Text numberOfLines={1} style={styles.pieceLabel}>{item.name || item.subType}</Text>
-    </Pressable>
-  );
-}
+type LayerKey = 'outerwear' | 'top' | 'bottom' | 'shoes';
 
-function Figure({ top, bottom, shoes, onPressItem }: Props) {
-  return (
-    <View style={styles.figure}>
-      <View style={styles.head} />
-      <View style={styles.body} />
-      <View style={styles.legs} />
-      <Pressable onPress={() => onPressItem?.(top)} style={styles.figureTop}>
-        <Image source={{ uri: top.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
-      </Pressable>
-      <Pressable onPress={() => onPressItem?.(bottom)} style={styles.figureBottom}>
-        <Image source={{ uri: bottom.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
-      </Pressable>
-      <Pressable onPress={() => onPressItem?.(shoes)} style={styles.figureShoes}>
-        <Image source={{ uri: shoes.cutoutUri! }} style={styles.figureImage} resizeMode="contain" />
-      </Pressable>
-    </View>
-  );
-}
+const layerOrder: LayerKey[] = ['outerwear', 'top', 'bottom', 'shoes'];
 
-export function OutfitPreview(props: Props) {
-  const canUseFigure = Boolean(props.top.cutoutUri && props.bottom.cutoutUri && props.shoes.cutoutUri);
-  const extras: Array<{ item: ClothingItem; category: Category }> = [];
-  if (props.hat) extras.push({ item: props.hat, category: 'hat' });
-  if (props.accessory) extras.push({ item: props.accessory, category: 'accessory' });
-  if (props.outerwear) extras.push({ item: props.outerwear, category: 'outerwear' });
-
-  return (
-    <View style={styles.wrap}>
-      {canUseFigure ? (
-        <Figure {...props} />
-      ) : (
-        <View style={styles.board}>
-          <BoardPiece item={props.top} large onPress={props.onPressItem} />
-          <View style={styles.boardColumn}>
-            <BoardPiece item={props.bottom} onPress={props.onPressItem} />
-            <BoardPiece item={props.shoes} onPress={props.onPressItem} />
-          </View>
-        </View>
-      )}
-      {extras.length > 0 ? (
-        <View style={styles.extrasRow}>
-          {extras.map((entry) => (
-            <ExtraThumb
-              key={entry.category}
-              item={entry.item}
-              category={entry.category}
-              onPress={props.onPressItem}
-              onRemove={props.onRemoveExtra ? () => props.onRemoveExtra!(entry.category as OptionalCategory) : undefined}
-              onSwap={props.onSwapExtra ? () => props.onSwapExtra!(entry.category as OptionalCategory) : undefined}
-            />
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ExtraThumb({ item, category, onPress, onRemove, onSwap }: {
-  item: ClothingItem;
-  category: Category;
-  onPress?: (item: ClothingItem) => void;
-  onRemove?: () => void;
-  onSwap?: () => void;
-}) {
-  const { language } = useI18n();
-  const labels: Record<Category, [string, string]> = {
+function labelFor(category: Category, language: 'tr' | 'en'): string {
+  const map: Record<Category, [string, string]> = {
     top: ['Üst', 'Top'],
     bottom: ['Alt', 'Bottom'],
     shoes: ['Ayakkabı', 'Shoes'],
@@ -109,43 +31,163 @@ function ExtraThumb({ item, category, onPress, onRemove, onSwap }: {
     accessory: ['Aksesuar', 'Accessory'],
     outerwear: ['Mont', 'Jacket'],
   };
-  const [tr, en] = labels[category];
+  const [tr, en] = map[category];
+  return language === 'tr' ? tr : en;
+}
+
+function LayerCard({ item, category, onPress, badge, iconColor }: {
+  item: ClothingItem;
+  category: Category;
+  onPress?: (item: ClothingItem) => void;
+  badge?: string;
+  iconColor: string;
+}) {
+  const { language } = useI18n();
+  const lang = language === 'tr' ? 'tr' : 'en';
+  const label = labelFor(category, lang);
+  const meta = [item.primaryColor, item.subType].filter(Boolean).join(' · ');
   return (
-    <View style={styles.extraThumbWrap}>
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={`${label} · ${item.name || item.subType || label}`}
+      onPress={() => onPress?.(item)}
+      style={({ pressed }) => [styles.layerCard, pressed && styles.pressed]}
+    >
+      <Image source={{ uri: item.cutoutUri ?? item.thumbnailUri ?? item.photoUri }} style={styles.layerImage} resizeMode="cover" />
+      <View style={styles.layerBody}>
+        <View style={styles.layerHeader}>
+          <View style={styles.layerIconWrap}>
+            <CategoryIcon category={category} size={16} color={iconColor} />
+          </View>
+          <Text style={styles.layerLabel}>{label}</Text>
+          {badge ? <Text style={styles.layerBadge}>{badge}</Text> : null}
+        </View>
+        <Text numberOfLines={1} style={styles.layerName}>
+          {item.name || item.subType || label}
+        </Text>
+        {meta ? <Text numberOfLines={1} style={styles.layerMeta}>{meta}</Text> : null}
+      </View>
+      <Text style={styles.chevron}>›</Text>
+    </Pressable>
+  );
+}
+
+function ExtraChip({ item, category, onPress, onRemove, onSwap, iconColor }: {
+  item: ClothingItem;
+  category: Category;
+  onPress?: (item: ClothingItem) => void;
+  onRemove?: () => void;
+  onSwap?: () => void;
+  iconColor: string;
+}) {
+  const { language } = useI18n();
+  const lang = language === 'tr' ? 'tr' : 'en';
+  const label = labelFor(category, lang);
+  return (
+    <View style={styles.extraChip}>
       <Pressable
         accessibilityRole="imagebutton"
-        accessibilityLabel={language === 'tr' ? `${tr} · ${item.name || item.subType}` : `${en} · ${item.name || item.subType}`}
+        accessibilityLabel={`${label} · ${item.name || item.subType}`}
         onPress={() => onPress?.(item)}
-        style={({ pressed }) => [styles.extraThumb, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.extraChipInner, pressed && styles.pressed]}
       >
-        <Image source={{ uri: item.cutoutUri ?? item.photoUri }} style={styles.extraThumbImage} resizeMode="contain" />
-        <View style={styles.extraThumbMeta}>
-          <Text style={styles.extraThumbTag}>{language === 'tr' ? tr : en}</Text>
-          <Text numberOfLines={1} style={styles.extraThumbName}>{item.name || item.subType}</Text>
+        <Image source={{ uri: item.cutoutUri ?? item.thumbnailUri ?? item.photoUri }} style={styles.extraImage} resizeMode="cover" />
+        <View style={styles.extraBody}>
+          <View style={styles.extraHeader}>
+            <CategoryIcon category={category} size={14} color={iconColor} />
+            <Text style={styles.extraLabel}>{label}</Text>
+          </View>
+          <Text numberOfLines={1} style={styles.extraName}>{item.name || item.subType}</Text>
         </View>
       </Pressable>
-      {(onRemove || onSwap) ? (
-        <View style={styles.extraThumbActions}>
+      {(onSwap || onRemove) ? (
+        <View style={styles.extraActions}>
           {onSwap ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={language === 'tr' ? `${tr} değiştir` : `Swap ${en}`}
-              onPress={onSwap}
-              hitSlop={8}
-              style={({ pressed }) => [styles.extraThumbAction, pressed && styles.pressed]}
-            >
-              <Text style={styles.extraThumbActionText}>↻</Text>
+            <Pressable onPress={onSwap} hitSlop={8} style={({ pressed }) => [styles.extraAction, pressed && styles.pressed]}>
+              <Text style={styles.extraActionText}>↻</Text>
             </Pressable>
           ) : null}
           {onRemove ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={language === 'tr' ? `${tr} kaldır` : `Remove ${en}`}
-              onPress={onRemove}
-              hitSlop={8}
-              style={({ pressed }) => [styles.extraThumbAction, styles.extraThumbActionDanger, pressed && styles.pressed]}
-            >
-              <Text style={[styles.extraThumbActionText, styles.extraThumbActionTextDanger]}>×</Text>
+            <Pressable onPress={onRemove} hitSlop={8} style={({ pressed }) => [styles.extraAction, styles.extraActionDanger, pressed && styles.pressed]}>
+              <Text style={[styles.extraActionText, styles.extraActionTextDanger]}>×</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function OutfitPreview(props: Props) {
+  const { language } = useI18n();
+  const scheme = useColorScheme();
+  const iconColor = scheme === 'dark' ? darkPalette.primary : lightPalette.primary;
+  const lang = language === 'tr' ? 'tr' : 'en';
+
+  const layers: Array<{ key: LayerKey; item: ClothingItem; category: Category; badge?: string }> = [];
+  if (props.outerwear) {
+    layers.push({
+      key: 'outerwear', item: props.outerwear, category: 'outerwear',
+      badge: lang === 'tr' ? 'En üst kat' : 'Outer layer',
+    });
+  }
+  layers.push({
+    key: 'top', item: props.top, category: 'top',
+    badge: props.outerwear ? (lang === 'tr' ? 'Mont altı' : 'Under layer') : undefined,
+  });
+  layers.push({ key: 'bottom', item: props.bottom, category: 'bottom' });
+  layers.push({ key: 'shoes', item: props.shoes, category: 'shoes' });
+
+  const extras: Array<{ item: ClothingItem; category: OptionalCategory }> = [];
+  if (props.hat) extras.push({ item: props.hat, category: 'hat' });
+  if (props.accessory) extras.push({ item: props.accessory, category: 'accessory' });
+
+  return (
+    <View style={styles.wrap}>
+      {props.outerwear ? (
+        <View style={styles.layerHint}>
+          <Text style={styles.layerHintText}>
+            {lang === 'tr'
+              ? '🧥 Montun altına bir üst öneriliyor — yukarıdan aşağı sıralandı.'
+              : '🧥 A layer under the jacket is included — sorted top to bottom.'}
+          </Text>
+        </View>
+      ) : null}
+      {layers.sort((a, b) => layerOrder.indexOf(a.key) - layerOrder.indexOf(b.key)).map((layer) => (
+        <LayerCard
+          key={layer.key}
+          item={layer.item}
+          category={layer.category}
+          onPress={props.onPressItem}
+          badge={layer.badge}
+          iconColor={iconColor}
+        />
+      ))}
+      {extras.length > 0 ? (
+        <View style={styles.extrasRow}>
+          {extras.map((entry) => (
+            <ExtraChip
+              key={entry.category}
+              item={entry.item}
+              category={entry.category}
+              onPress={props.onPressItem}
+              onRemove={props.onRemoveExtra ? () => props.onRemoveExtra!(entry.category) : undefined}
+              onSwap={props.onSwapExtra ? () => props.onSwapExtra!(entry.category) : undefined}
+              iconColor={iconColor}
+            />
+          ))}
+        </View>
+      ) : null}
+      {props.outerwear && (props.onRemoveExtra || props.onSwapExtra) ? (
+        <View style={styles.outerwearActions}>
+          {props.onSwapExtra ? (
+            <Pressable onPress={() => props.onSwapExtra!('outerwear')} hitSlop={8} style={({ pressed }) => [styles.outerwearAction, pressed && styles.pressed]}>
+              <Text style={styles.outerwearActionText}>↻ {lang === 'tr' ? 'Mont değiştir' : 'Swap jacket'}</Text>
+            </Pressable>
+          ) : null}
+          {props.onRemoveExtra ? (
+            <Pressable onPress={() => props.onRemoveExtra!('outerwear')} hitSlop={8} style={({ pressed }) => [styles.outerwearAction, styles.outerwearActionDanger, pressed && styles.pressed]}>
+              <Text style={[styles.outerwearActionText, styles.outerwearActionTextDanger]}>× {lang === 'tr' ? 'Montu kaldır' : 'Remove jacket'}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -156,65 +198,108 @@ function ExtraThumb({ item, category, onPress, onRemove, onSwap }: {
 
 const styles = StyleSheet.create({
   wrap: { gap: spacing.sm },
-  extrasRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  extraThumbWrap: { flexGrow: 1, flexBasis: '30%', position: 'relative' },
-  extraThumb: {
-    minHeight: 76,
+  layerHint: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.sm,
+  },
+  layerHintText: { color: colors.primary, fontSize: 12, fontWeight: '800', lineHeight: 17 },
+  layerCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.xs,
-  },
-  extraThumbActions: { position: 'absolute', top: 4, right: 4, flexDirection: 'row', gap: 4 },
-  extraThumbAction: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1, borderColor: colors.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  extraThumbActionDanger: { borderColor: colors.danger },
-  extraThumbActionText: { color: colors.text, fontSize: 14, fontWeight: '800', lineHeight: 16 },
-  extraThumbActionTextDanger: { color: colors.danger, fontSize: 16, lineHeight: 16 },
-  extraThumbImage: { width: 48, height: 48, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
-  extraThumbMeta: { flex: 1, gap: 2 },
-  extraThumbTag: { color: colors.primary, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
-  extraThumbName: { color: colors.text, fontSize: 13, fontWeight: '800' },
-  board: {
-    height: 320,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surfaceMuted,
-    padding: spacing.sm,
-  },
-  boardColumn: { flex: 1, gap: spacing.sm },
-  boardPiece: {
-    flex: 1,
-    overflow: 'hidden',
-    borderRadius: radius.md,
     backgroundColor: colors.surface,
-    padding: spacing.xs,
   },
-  boardPieceLarge: { flex: 1.08 },
-  boardImage: { flex: 1, width: '100%' },
-  pieceLabel: { color: colors.text, fontSize: 12, fontWeight: '700', padding: 5 },
-  pressed: { opacity: 0.75 },
-  figure: {
-    height: 360,
-    alignItems: 'center',
-    overflow: 'hidden',
-    borderRadius: radius.lg,
+  layerImage: {
+    width: 84,
+    height: 84,
+    borderRadius: radius.sm,
     backgroundColor: colors.surfaceMuted,
   },
-  head: { position: 'absolute', top: 15, width: 52, height: 52, borderRadius: 28, backgroundColor: colors.figure },
-  body: { position: 'absolute', top: 68, width: 132, height: 132, borderRadius: 55, backgroundColor: colors.figure },
-  legs: { position: 'absolute', top: 188, width: 92, height: 135, borderRadius: 30, backgroundColor: colors.figure },
-  figureTop: { position: 'absolute', top: 58, width: 178, height: 145 },
-  figureBottom: { position: 'absolute', top: 170, width: 150, height: 145 },
-  figureShoes: { position: 'absolute', top: 298, width: 164, height: 55 },
-  figureImage: { width: '100%', height: '100%' },
+  layerBody: { flex: 1, gap: 2 },
+  layerHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  layerIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  layerLabel: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  layerBadge: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    marginLeft: 'auto',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: colors.surfaceMuted,
+  },
+  layerName: { color: colors.text, fontSize: 16, fontWeight: '900' },
+  layerMeta: { color: colors.muted, fontSize: 12, fontWeight: '600' },
+  chevron: { color: colors.muted, fontSize: 26, fontWeight: '400', marginRight: 2 },
+  pressed: { opacity: 0.72 },
+  extrasRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  extraChip: { flexGrow: 1, flexBasis: '45%', position: 'relative' },
+  extraChipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: spacing.xs,
+    paddingRight: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  extraImage: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  extraBody: { flex: 1, gap: 1 },
+  extraHeader: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  extraLabel: {
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  extraName: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  extraActions: { position: 'absolute', top: 4, right: 4, flexDirection: 'row', gap: 4 },
+  extraAction: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraActionDanger: { borderColor: colors.danger },
+  extraActionText: { color: colors.text, fontSize: 12, fontWeight: '800', lineHeight: 14 },
+  extraActionTextDanger: { color: colors.danger, fontSize: 14, lineHeight: 14 },
+  outerwearActions: { flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' },
+  outerwearAction: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  outerwearActionDanger: { borderColor: colors.danger },
+  outerwearActionText: { color: colors.text, fontSize: 11, fontWeight: '800' },
+  outerwearActionTextDanger: { color: colors.danger },
 });
