@@ -81,7 +81,6 @@ export function ClothingActionSheet({
               </View>
               <View style={styles.actionCopy}>
                 <Text style={styles.deleteTitle}>{l('Dolaptan kaldır', 'Remove from wardrobe')}</Text>
-                <Text style={styles.deleteText}>{l('8 saniye içinde geri alabilirsin', 'You can undo within 8 seconds')}</Text>
               </View>
             </Pressable>
 

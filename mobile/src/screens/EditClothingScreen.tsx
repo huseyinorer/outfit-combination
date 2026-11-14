@@ -89,7 +89,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
 
   const confirmDelete = () => Alert.alert(
     l('Kıyafeti sil', 'Delete clothing'),
-    l('Kayıt dolaptan kaldırılacak. Ana sayfadaki bildirimin ardından 8 saniye içinde geri alabilirsin.', 'The item will be removed. You can undo it from the home screen for 8 seconds.'),
+    l('Kayıt dolaptan kaldırılacak.', 'The item will be removed from your wardrobe.'),
     [
       { text: t('common.cancel'), style: 'cancel' },
       { text: t('common.delete'), style: 'destructive', onPress: () => void remove() },

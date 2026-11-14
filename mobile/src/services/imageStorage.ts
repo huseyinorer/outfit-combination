@@ -26,10 +26,22 @@ export async function prepareSelectedImage(sourceUri: string, draftId: string): 
   return destination.uri;
 }
 
+const isPng = (uri: string) => uri.toLowerCase().endsWith('.png');
+
+export async function adoptProcessedImage(processedUri: string, baseName: string): Promise<string> {
+  ensureDirectories();
+  const source = new File(processedUri);
+  const destination = new File(pending, `${baseName}.png`);
+  if (destination.exists) destination.delete();
+  await source.copy(destination);
+  try { source.delete(); } catch { /* cache file cleanup is best-effort */ }
+  return destination.uri;
+}
+
 export async function finalizeImage(pendingUri: string, clothingId: string): Promise<string> {
   ensureDirectories();
   const source = new File(pendingUri);
-  const destination = new File(wardrobe, `${clothingId}.jpg`);
+  const destination = new File(wardrobe, `${clothingId}.${isPng(pendingUri) ? 'png' : 'jpg'}`);
   if (destination.exists) destination.delete();
   await source.copy(destination);
   return destination.uri;
@@ -37,12 +49,15 @@ export async function finalizeImage(pendingUri: string, clothingId: string): Pro
 
 export async function createThumbnail(photoUri: string, clothingId: string): Promise<string> {
   ensureDirectories();
+  const png = isPng(photoUri);
   const context = ImageManipulator.manipulate(photoUri);
   context.resize({ width: 420, height: null });
   const rendered = await context.renderAsync();
-  const normalized = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.72 });
+  const normalized = await rendered.saveAsync(png
+    ? { format: SaveFormat.PNG }
+    : { format: SaveFormat.JPEG, compress: 0.72 });
   const source = new File(normalized.uri);
-  const destination = new File(thumbnails, `${clothingId}.jpg`);
+  const destination = new File(thumbnails, `${clothingId}.${png ? 'png' : 'jpg'}`);
   if (destination.exists) destination.delete();
   await source.copy(destination);
   return destination.uri;

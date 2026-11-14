@@ -31,7 +31,7 @@ import {
 import { analyzeClothing } from '../services/api';
 import { hapticTick } from '../services/haptics';
 import { createThumbnail, deleteStoredImage, finalizeImage, imageContentHash, prepareSelectedImage } from '../services/imageStorage';
-import { isBackgroundRemovalAvailable, removeBackground } from '../services/backgroundRemoval';
+import { isBackgroundRemovalAvailable, prepareBackgroundRemoval, removeBackground } from '../services/backgroundRemoval';
 import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
@@ -98,6 +98,7 @@ export function AddClothingScreen(props: Props) {
     getSetting('last_photo_source').then((value) => {
       if (value === 'gallery' || value === 'camera') setLastSource(value);
     });
+    prepareBackgroundRemoval();
     return () => analysisRequestRef.current?.abort();
   }, []);
 

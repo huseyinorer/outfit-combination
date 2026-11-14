@@ -111,6 +111,17 @@ type Screen =
   | { name: 'privacy'; returnTo?: 'auth' | 'settings'; authReturnTo?: 'home' | 'settings'; document?: 'privacy' | 'terms' }
   | { name: 'onboarding' };
 
+const UNDO_SECONDS = 8;
+
+function UndoCountdown({ seconds }: { seconds: number }) {
+  const [left, setLeft] = useState(seconds);
+  useEffect(() => {
+    const timer = setInterval(() => setLeft((value) => Math.max(0, value - 1)), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+  return <Text style={styles.undoCountdown}>{left}</Text>;
+}
+
 const bundledApiUrl = normalizeApiBaseUrl(String(Constants.expoConfig?.extra?.apiBaseUrl ?? ''));
 const internalToolsEnabled = Constants.expoConfig?.extra?.internalTools === true;
 const topSystemInset = Platform.OS === 'android'
@@ -388,13 +399,17 @@ export default function App() {
   };
 
   const finalizeDeletedItem = async (item: ClothingItem) => {
-    await removeClothing(item.id);
-    deleteStoredImage(item.photoUri);
-    deleteStoredImage(item.thumbnailUri);
-    deleteStoredImage(item.cutoutUri);
     if (deletedItemRef.current?.id === item.id) {
       deletedItemRef.current = null;
       setRecentlyDeleted(null);
+    }
+    try {
+      await removeClothing(item.id);
+      deleteStoredImage(item.photoUri);
+      deleteStoredImage(item.thumbnailUri);
+      deleteStoredImage(item.cutoutUri);
+    } catch {
+      // The row stays soft-deleted; activateAccountWardrobe purges it on next launch.
     }
   };
 
@@ -414,7 +429,7 @@ export default function App() {
     setScreen({ name: 'home' });
     deleteTimerRef.current = setTimeout(() => {
       void finalizeDeletedItem(item);
-    }, 8_000);
+    }, UNDO_SECONDS * 1_000);
   };
 
   const undoDelete = async () => {
@@ -856,6 +871,7 @@ export default function App() {
             <Text numberOfLines={1} style={styles.undoText}>
               {t('feedback.deleted', { name: recentlyDeleted.name || t('common.clothing') })}
             </Text>
+            <UndoCountdown key={recentlyDeleted.id} seconds={UNDO_SECONDS} />
             <Pressable accessibilityRole="button" onPress={() => void undoDelete()} hitSlop={10}>
               <Text style={styles.undoAction}>{t('feedback.undo')}</Text>
             </Pressable>
@@ -897,5 +913,6 @@ const styles = StyleSheet.create({
   undoBarStacked: { bottom: 82 },
   undoText: { flex: 1, color: colors.snackbarText, fontSize: 14, fontWeight: '700' },
   undoAction: { color: colors.snackbarAction, fontSize: 13, fontWeight: '900', letterSpacing: .5 },
+  undoCountdown: { minWidth: 18, textAlign: 'center', color: colors.snackbarText, fontSize: 13, fontWeight: '900', opacity: 0.7, fontVariant: ['tabular-nums'] },
 });
 

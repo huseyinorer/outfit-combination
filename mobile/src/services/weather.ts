@@ -12,12 +12,11 @@ export interface WeatherSnapshot {
   fetchedAt: string;
 }
 
-const CACHE_KEY = 'weather_snapshot';
+const CACHE_KEY = 'weather_snapshot_v2';
 const COORDS_KEY = 'weather_coords';
 const CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast';
-const GEOCODE = 'https://geocoding-api.open-meteo.com/v1/reverse';
 
 export function seasonForTemperature(tempC: number): WeatherSeason {
   if (tempC >= 24) return 'summer';
@@ -37,17 +36,15 @@ interface ForecastResponse {
   timezone?: string;
 }
 
-interface ReverseResponse {
-  results?: Array<{ name?: string; admin1?: string; country?: string }>;
-}
-
-async function reverseGeocode(latitude: number, longitude: number, signal?: AbortSignal): Promise<string | null> {
+async function reverseGeocode(latitude: number, longitude: number): Promise<string | null> {
   try {
-    const url = `${GEOCODE}?latitude=${latitude}&longitude=${longitude}&count=1&language=tr&format=json`;
-    const body = await fetchJson<ReverseResponse>(url, signal);
-    const hit = body.results?.[0];
-    if (!hit) return null;
-    return [hit.name, hit.admin1].filter(Boolean).join(', ') || null;
+    const [place] = await Location.reverseGeocodeAsync({ latitude, longitude });
+    if (!place) return null;
+    const province = place.region?.trim() || null;
+    const district = (place.subregion || place.city || place.district)?.trim() || null;
+    const parts = [district, province].filter((part, index, all): part is string =>
+      Boolean(part) && all.indexOf(part) === index);
+    return parts.join(', ') || null;
   } catch {
     return null;
   }
@@ -58,7 +55,7 @@ async function fetchWeatherAt(latitude: number, longitude: number, signal?: Abor
   const body = await fetchJson<ForecastResponse>(url, signal);
   const temperatureC = body.current?.temperature_2m ?? 20;
   const precipitationMm = body.current?.precipitation ?? 0;
-  const label = await reverseGeocode(latitude, longitude, signal);
+  const label = await reverseGeocode(latitude, longitude);
   return {
     temperatureC,
     precipitationMm,
