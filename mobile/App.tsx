@@ -88,6 +88,8 @@ import { HistoryScreen } from './src/screens/HistoryScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { PackingScreen } from './src/screens/PackingScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
+import { SetupScreen } from './src/screens/SetupScreen';
+import { isBackgroundRemovalAvailable } from './src/services/backgroundRemoval';
 import {
   applyThemePreference,
   colors,
@@ -109,7 +111,8 @@ type Screen =
   | { name: 'packing' }
   | { name: 'settings' }
   | { name: 'privacy'; returnTo?: 'auth' | 'settings'; authReturnTo?: 'home' | 'settings'; document?: 'privacy' | 'terms' }
-  | { name: 'onboarding' };
+  | { name: 'onboarding' }
+  | { name: 'setup'; next: Screen };
 
 const UNDO_SECONDS = 8;
 
@@ -295,13 +298,15 @@ export default function App() {
 
         const wardrobeState = await reloadWardrobeState();
         const canEnterApp = Boolean(nextAccount.user) || authGate === 'true';
-        if (!canEnterApp) {
-          setScreen({ name: 'auth' });
-        } else if (onboarding !== 'true' && wardrobeState.items.length === 0 && !wardrobeState.draft) {
-          setScreen({ name: 'onboarding' });
-        } else {
-          setScreen({ name: 'home' });
-        }
+        const nextScreen: Screen = !canEnterApp
+          ? { name: 'auth' }
+          : onboarding !== 'true' && wardrobeState.items.length === 0 && !wardrobeState.draft
+            ? { name: 'onboarding' }
+            : { name: 'home' };
+        const setupDone = await getSetting('first_run_setup_done');
+        setScreen(setupDone !== 'true' && isBackgroundRemovalAvailable()
+          ? { name: 'setup', next: nextScreen }
+          : nextScreen);
 
         void Promise.all(wardrobeState.items.filter((item) => !item.thumbnailUri).map(async (item) => {
           try {
@@ -352,6 +357,7 @@ export default function App() {
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (screen.name === 'home' || (screen.name === 'auth' && !screen.returnTo)) return false;
+      if (screen.name === 'setup') return true;
       goBack();
       return true;
     });
@@ -835,6 +841,18 @@ export default function App() {
     case 'onboarding':
       content = <OnboardingScreen onStart={() => void completeOnboarding(true)} onSkip={() => void completeOnboarding(false)} />;
       break;
+    case 'setup': {
+      const next = screen.next;
+      content = (
+        <SetupScreen
+          onDone={() => {
+            void setSetting('first_run_setup_done', 'true');
+            setScreen(next);
+          }}
+        />
+      );
+      break;
+    }
     default:
       content = (
         <HomeScreen

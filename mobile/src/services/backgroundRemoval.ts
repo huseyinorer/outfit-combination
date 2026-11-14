@@ -17,6 +17,28 @@ export function prepareBackgroundRemoval(): void {
   subjectSegmenterModule?.prepare().catch(() => undefined);
 }
 
+export type ModelPreparation = 'ready' | 'unavailable' | 'failed';
+
+export async function prepareBackgroundRemovalWithProgress(
+  onProgress: (fraction: number) => void,
+): Promise<ModelPreparation> {
+  const module = subjectSegmenterModule;
+  if (!module) return 'unavailable';
+  const subscription = module.addListener('onPrepareProgress', ({ bytesDownloaded, totalBytes }) => {
+    if (totalBytes > 0) onProgress(Math.min(1, bytesDownloaded / totalBytes));
+  });
+  try {
+    await module.prepare();
+    onProgress(1);
+    return 'ready';
+  } catch (error) {
+    reportError(error, { stage: 'backgroundRemoval.prepare' });
+    return 'failed';
+  } finally {
+    subscription.remove();
+  }
+}
+
 export async function removeBackground(photoUri: string): Promise<BackgroundRemovalResult> {
   if (!subjectSegmenterModule) return { resultUri: photoUri, usedNativeModule: false };
   try {

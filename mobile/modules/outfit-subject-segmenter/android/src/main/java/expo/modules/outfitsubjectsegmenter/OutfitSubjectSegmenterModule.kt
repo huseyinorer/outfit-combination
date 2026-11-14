@@ -22,6 +22,8 @@ import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.min
 
+private const val PROGRESS_EVENT = "onPrepareProgress"
+
 class OutfitSubjectSegmenterModule : Module() {
   private var segmenter: SubjectSegmenter? = null
 
@@ -39,10 +41,15 @@ class OutfitSubjectSegmenterModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("OutfitSubjectSegmenter")
 
+    Events(PROGRESS_EVENT)
+
     AsyncFunction("prepare") { promise: Promise ->
       ensureModel(
         onReady = { promise.resolve(true) },
         onError = { error -> promise.reject("ERR_MODEL_UNAVAILABLE", error.message, error) },
+        onProgress = { downloaded, total ->
+          sendEvent(PROGRESS_EVENT, mapOf("bytesDownloaded" to downloaded, "totalBytes" to total))
+        },
       )
     }
 
@@ -59,7 +66,11 @@ class OutfitSubjectSegmenterModule : Module() {
     }
   }
 
-  private fun ensureModel(onReady: () -> Unit, onError: (Exception) -> Unit) {
+  private fun ensureModel(
+    onReady: () -> Unit,
+    onError: (Exception) -> Unit,
+    onProgress: (downloaded: Double, total: Double) -> Unit = { _, _ -> },
+  ) {
     val installer = ModuleInstall.getClient(context)
     val api = client()
     installer.areModulesAvailable(api)
@@ -70,6 +81,9 @@ class OutfitSubjectSegmenterModule : Module() {
         }
         val listener = object : InstallStatusListener {
           override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
+            update.progressInfo?.let { info ->
+              onProgress(info.bytesDownloaded.toDouble(), info.totalBytesToDownload.toDouble())
+            }
             when (update.installState) {
               ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> {
                 installer.unregisterListener(this)
