@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
@@ -46,7 +48,7 @@ class OutfitSubjectSegmenterModule : Module() {
 
     AsyncFunction("removeBackground") { uri: String, promise: Promise ->
       ensureModel(
-        onReady = { segment(uri, promise) },
+        onReady = { segment(uri, promise, retriesLeft = 2) },
         onError = { error -> promise.reject("ERR_MODEL_UNAVAILABLE", error.message, error) },
       )
     }
@@ -71,6 +73,8 @@ class OutfitSubjectSegmenterModule : Module() {
             when (update.installState) {
               ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> {
                 installer.unregisterListener(this)
+                // A client created before the download keeps its failed module load; start fresh.
+                resetClient()
                 onReady()
               }
               ModuleInstallStatusUpdate.InstallState.STATE_FAILED,
@@ -101,7 +105,12 @@ class OutfitSubjectSegmenterModule : Module() {
       .addOnFailureListener { error -> onError(error) }
   }
 
-  private fun segment(uri: String, promise: Promise) {
+  private fun resetClient() {
+    segmenter?.close()
+    segmenter = null
+  }
+
+  private fun segment(uri: String, promise: Promise, retriesLeft: Int) {
     val bitmap = try {
       decode(uri)
     } catch (error: Exception) {
@@ -128,7 +137,15 @@ class OutfitSubjectSegmenterModule : Module() {
           promise.reject("ERR_SAVE", error.message, error)
         }
       }
-      .addOnFailureListener { error -> promise.reject("ERR_SEGMENT", error.message, error) }
+      .addOnFailureListener { error ->
+        // Right after an on-demand install Play services may need a moment before the module loads.
+        if (retriesLeft > 0 && error.message?.contains("Failed to load", ignoreCase = true) == true) {
+          resetClient()
+          Handler(Looper.getMainLooper()).postDelayed({ segment(uri, promise, retriesLeft - 1) }, 1_500)
+        } else {
+          promise.reject("ERR_SEGMENT", error.message, error)
+        }
+      }
   }
 
   private fun decode(uri: String): Bitmap {

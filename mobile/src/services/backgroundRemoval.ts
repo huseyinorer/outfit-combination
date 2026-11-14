@@ -7,7 +7,7 @@ export interface BackgroundRemovalResult {
   usedNativeModule: boolean;
 }
 
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 150_000;
 
 export function isBackgroundRemovalAvailable(): boolean {
   return subjectSegmenterModule !== null;
