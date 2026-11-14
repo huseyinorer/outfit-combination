@@ -9,6 +9,7 @@ import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import type { AccountState } from '../services/accountAuth';
 import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
+import { countWornByClothing } from '../data/database';
 
 type Filter = 'all' | Category | 'recent' | 'summer' | 'winter';
 
@@ -44,6 +45,11 @@ export function HomeScreen(props: Props) {
   const [menuItem, setMenuItem] = React.useState<ClothingItem | null>(null);
   const [accountBusy, setAccountBusy] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [wearCounts, setWearCounts] = React.useState<Map<string, number>>(new Map());
+
+  React.useEffect(() => {
+    void (async () => setWearCounts(await countWornByClothing()))();
+  }, [props.items.length]);
   const refresh = React.useCallback(async () => {
     if (!props.onRefresh) return;
     setRefreshing(true);
@@ -287,6 +293,7 @@ export function HomeScreen(props: Props) {
           <ClothingCard
             item={item}
             width={cardWidth}
+            wears={wearCounts.get(item.id) ?? 0}
             onPress={() => props.onOpen(item)}
             onMenu={() => setMenuItem(item)}
           />

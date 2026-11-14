@@ -3,15 +3,20 @@ import { type ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
-export function ClothingCard({ item, onPress, onMenu, width }: {
+export function ClothingCard({ item, onPress, onMenu, width, wears }: {
   item: ClothingItem;
   onPress: () => void;
   onMenu: () => void;
   width: number;
+  wears?: number;
 }) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const categoryLabel = t(`category.${item.category}` as 'category.top' | 'category.bottom' | 'category.shoes');
+  const wearCount = wears ?? 0;
+  const perWear = (typeof item.price === 'number' && item.price > 0 && wearCount > 0)
+    ? item.price / wearCount
+    : null;
   return (
     <Pressable
       accessibilityRole="button"
@@ -27,6 +32,11 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
         style={styles.image}
         resizeMode="cover"
       />
+      {wearCount > 0 ? (
+        <View style={styles.wearBadge}>
+          <Text style={styles.wearBadgeText}>×{wearCount}</Text>
+        </View>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={l(`${item.name || 'Kıyafet'} seçenekleri`, `${item.name || 'Clothing'} options`)}
@@ -41,6 +51,11 @@ export function ClothingCard({ item, onPress, onMenu, width }: {
         <Text numberOfLines={1} style={styles.meta}>
           {[item.primaryColor, item.subType].filter(Boolean).join(' · ') || categoryLabel}
         </Text>
+        {perWear != null ? (
+          <Text numberOfLines={1} style={styles.perWear}>
+            {perWear.toFixed(2)} {item.currency || (language === 'tr' ? 'TL' : 'USD')} / {l('giyim', 'wear')}
+          </Text>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -71,5 +86,19 @@ const styles = StyleSheet.create({
   body: { padding: spacing.sm, gap: 3 },
   name: { color: colors.text, fontSize: 15, fontWeight: '700' },
   meta: { color: colors.muted, fontSize: 12 },
+  perWear: { color: colors.primary, fontSize: 11, fontWeight: '900', marginTop: 2 },
+  wearBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.xs,
+    minWidth: 32,
+    height: 26,
+    paddingHorizontal: 8,
+    borderRadius: 13,
+    backgroundColor: colors.imageActionSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wearBadgeText: { color: colors.imageActionText, fontSize: 12, fontWeight: '900' },
 });
 

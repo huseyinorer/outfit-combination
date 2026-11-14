@@ -1,4 +1,3 @@
-import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { reportError } from './observability';
 
@@ -7,50 +6,40 @@ export interface BackgroundRemovalResult {
   usedNativeModule: boolean;
 }
 
-type SegmenterModule = {
-  process: (uri: string) => Promise<{ maskUri?: string; resultUri?: string }>;
-};
+type NativeApi = (uri: string) => Promise<string>;
 
-let cachedModule: SegmenterModule | null | undefined;
+let cached: NativeApi | null | undefined;
 
-function loadNativeSegmenter(): SegmenterModule | null {
-  if (cachedModule !== undefined) return cachedModule;
-  try {
-    const mod = require('@react-native-ml-kit/subject-segmentation') as unknown;
-    if (mod && typeof (mod as { default?: unknown }).default === 'object') {
-      cachedModule = (mod as { default: SegmenterModule }).default;
-    } else if (mod && typeof (mod as SegmenterModule).process === 'function') {
-      cachedModule = mod as SegmenterModule;
-    } else {
-      cachedModule = null;
-    }
-  } catch {
-    cachedModule = null;
+function loadNative(): NativeApi | null {
+  if (cached !== undefined) return cached;
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
+    cached = null;
+    return cached;
   }
-  return cachedModule;
+  try {
+    const mod = require('react-native-background-remover') as { removeBackground?: NativeApi };
+    cached = typeof mod?.removeBackground === 'function' ? mod.removeBackground : null;
+  } catch {
+    cached = null;
+  }
+  return cached;
 }
 
 export function isBackgroundRemovalAvailable(): boolean {
-  if (Platform.OS === 'web') return false;
-  return loadNativeSegmenter() !== null;
+  return loadNative() !== null;
 }
 
 export async function removeBackground(photoUri: string): Promise<BackgroundRemovalResult> {
-  const native = loadNativeSegmenter();
+  const native = loadNative();
   if (!native) {
     return { resultUri: photoUri, usedNativeModule: false };
   }
   try {
-    const result = await native.process(photoUri);
-    const nextUri = result.resultUri ?? result.maskUri;
-    if (!nextUri) {
+    const resultUri = await native(photoUri);
+    if (!resultUri || resultUri === photoUri) {
       return { resultUri: photoUri, usedNativeModule: false };
     }
-    const info = await FileSystem.getInfoAsync(nextUri);
-    if (!info.exists) {
-      return { resultUri: photoUri, usedNativeModule: false };
-    }
-    return { resultUri: nextUri, usedNativeModule: true };
+    return { resultUri, usedNativeModule: true };
   } catch (error) {
     reportError(error, { stage: 'backgroundRemoval.process' });
     return { resultUri: photoUri, usedNativeModule: false };

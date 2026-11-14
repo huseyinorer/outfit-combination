@@ -433,30 +433,23 @@ export function SettingsScreen(props: Props) {
             </View>
           ) : null}
 
-          <View style={styles.card}>
-            <Text style={styles.title}>{l('Fotoğraf arka planı', 'Photo background')}</Text>
-            <Text style={styles.text}>
-              {l(
-                'Yeni kıyafet eklerken fotoğrafın arka planını cihazda otomatik kaldırır. Dolabın tutarlı görünür.',
-                'Removes the background of new clothing photos on-device, for a cleaner wardrobe look.',
-              )}
-            </Text>
-            {bgAvailable ? (
-              <SecondaryButton
-                title={bgRemoval
-                  ? l('Arka plan kaldırma: Açık · kapat', 'Background removal: On · turn off')
-                  : l('Arka plan kaldırmayı aç', 'Turn on background removal')}
-                onPress={() => void toggleBgRemoval()}
-              />
-            ) : (
-              <Text style={styles.deleteHint}>
+          {bgAvailable ? (
+            <View style={styles.card}>
+              <Text style={styles.title}>{l('Fotoğraf arka planı', 'Photo background')}</Text>
+              <Text style={styles.text}>
                 {l(
-                  'Bu özellik native modül (@react-native-ml-kit/subject-segmentation) + prebuild gerektirir; henüz bu yapıya dahil değil.',
-                  'Requires the @react-native-ml-kit/subject-segmentation native module and a prebuild; not yet bundled.',
+                  'Yeni kıyafet eklerken fotoğrafın arka planını cihazda otomatik temizler. Dolabın daha düzenli görünür.',
+                  'Removes the background of new clothing photos automatically, for a cleaner wardrobe look.',
                 )}
               </Text>
-            )}
-          </View>
+              <SecondaryButton
+                title={bgRemoval
+                  ? l('Açık · kapat', 'On · turn off')
+                  : l('Otomatik temizlemeyi aç', 'Turn on auto cleanup')}
+                onPress={() => void toggleBgRemoval()}
+              />
+            </View>
+          ) : null}
 
           <View style={styles.card}>
             <Text style={styles.title}>{t('settings.export')}</Text>

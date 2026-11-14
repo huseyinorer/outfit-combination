@@ -84,6 +84,8 @@ export function AddClothingScreen(props: Props) {
   const [analysisElapsed, setAnalysisElapsed] = useState(0);
   const [learnedApplied, setLearnedApplied] = useState(false);
   const [lastSource, setLastSource] = useState<'camera' | 'gallery'>('camera');
+  const [bgCleaning, setBgCleaning] = useState(false);
+  const bgRemovalAvailable = isBackgroundRemovalAvailable();
   const savingRef = useRef(false);
   const analysisRequestRef = useRef<AbortController | null>(null);
   const hasPhoto = Boolean(draft?.photoUri);
@@ -176,6 +178,26 @@ export function AddClothingScreen(props: Props) {
     analysisRequestRef.current?.abort();
     setAnalyzing(false);
     await persist({ ...current, analysisMode: 'manual', analysisError: null });
+  };
+
+  const cleanPhotoBackground = async (current: ClothingDraft) => {
+    if (bgCleaning) return;
+    setBgCleaning(true);
+    try {
+      const result = await removeBackground(current.photoUri);
+      if (result.usedNativeModule && result.resultUri !== current.photoUri) {
+        const previousUri = current.photoUri;
+        await persist({ ...current, photoUri: result.resultUri, photoHash: imageContentHash(result.resultUri) });
+        deleteStoredImage(previousUri);
+      } else {
+        Alert.alert(
+          l('Arka plan temizlenemedi', 'Could not clean background'),
+          l('Fotoğrafın güvende; mevcut haliyle devam edebilirsin.', 'Your photo is safe; you can continue as-is.'),
+        );
+      }
+    } finally {
+      setBgCleaning(false);
+    }
   };
 
   const applyDetectedCategory = async (current: ClothingDraft, detected: Category) => {
@@ -506,7 +528,22 @@ export function AddClothingScreen(props: Props) {
             ) : null}
             <View style={[styles.reviewLayout, wide && styles.reviewLayoutWide]}>
               <View style={styles.mediaColumn}>
-                <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
+                <View style={styles.previewWrap}>
+                  <Image source={{ uri: draft.photoUri }} style={styles.preview} resizeMode="contain" />
+                  {bgRemovalAvailable ? (
+                    <Pressable
+                      onPress={() => void cleanPhotoBackground(draft)}
+                      disabled={bgCleaning}
+                      style={({ pressed }) => [styles.bgButton, pressed && styles.pressed, bgCleaning && styles.disabled]}
+                      accessibilityRole="button"
+                      accessibilityLabel={l('Arka planı temizle', 'Clean background')}
+                    >
+                      {bgCleaning
+                        ? <ActivityIndicator color={colors.onPrimary} />
+                        : <Text style={styles.bgButtonText}>✂️ {l('Arka planı temizle', 'Clean background')}</Text>}
+                    </Pressable>
+                  ) : null}
+                </View>
                 {analyzing ? (
                   <View style={styles.analysisBox}>
                     <ActivityIndicator color={colors.primary} />
@@ -652,7 +689,24 @@ const styles = StyleSheet.create({
   reviewLayoutWide: { flexDirection: 'row', alignItems: 'flex-start' },
   mediaColumn: { flex: 0.9, minWidth: 280, gap: spacing.md },
   formColumn: { flex: 1.1, minWidth: 280 },
+  previewWrap: { position: 'relative' },
   preview: { width: '100%', height: 330, borderRadius: radius.lg, backgroundColor: colors.surfaceMuted },
+  bgButton: {
+    position: 'absolute',
+    left: spacing.sm,
+    right: spacing.sm,
+    bottom: spacing.sm,
+    minHeight: 40,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bgButtonText: { color: colors.onPrimary, fontSize: 13, fontWeight: '900' },
+  disabled: { opacity: 0.55 },
+  pressed: { opacity: 0.72 },
   analysisBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.primarySoft },
   analysisCopy: { flex: 1, gap: 4 },
   analysisTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
