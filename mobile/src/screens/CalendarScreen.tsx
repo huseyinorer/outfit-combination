@@ -26,6 +26,18 @@ function monthLabel(date: Date, language: string): string {
   return `${names[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+function longDayLabel(key: string, language: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  const days = language === 'tr'
+    ? ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
+    : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const month = monthLabel(date, language).split(' ')[0];
+  return language === 'tr'
+    ? `${date.getDate()} ${month} ${date.getFullYear()}, ${days[date.getDay()]}`
+    : `${days[date.getDay()]}, ${month} ${date.getDate()}, ${date.getFullYear()}`;
+}
+
 function dayKey(date: Date): string {
   const y = date.getFullYear();
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -119,15 +131,23 @@ export function CalendarScreen({ items, onBack }: Props) {
                 <Pressable
                   key={cell.key}
                   onPress={() => setSelected(cell.key)}
-                  style={[
-                    styles.cell,
-                    isToday && styles.cellToday,
-                    isSelected && styles.cellSelected,
-                    isFuture && styles.cellFuture,
-                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={hasWorn ? l(`${cell.date.getDate()}, kombin giyildi`, `${cell.date.getDate()}, outfit worn`) : String(cell.date.getDate())}
+                  style={[styles.cell, isFuture && styles.cellFuture]}
                 >
-                  <Text style={[styles.cellText, isSelected && styles.cellTextSelected]}>{cell.date.getDate()}</Text>
-                  {hasWorn ? <View style={styles.cellDot} /> : null}
+                  <View
+                    style={[
+                      styles.dayBubble,
+                      hasWorn && styles.dayBubbleWorn,
+                      isToday && styles.dayBubbleToday,
+                      isSelected && styles.dayBubbleSelected,
+                    ]}
+                  >
+                    <Text style={[styles.cellText, hasWorn && styles.cellTextWorn, isSelected && styles.cellTextSelected]}>
+                      {cell.date.getDate()}
+                    </Text>
+                  </View>
+                  <View style={[styles.cellDot, !hasWorn && styles.cellDotHidden]} />
                 </Pressable>
               );
             })}
@@ -140,7 +160,7 @@ export function CalendarScreen({ items, onBack }: Props) {
 
           {selected ? (
             <View style={styles.detail}>
-              <Text style={styles.detailTitle}>{selected}</Text>
+              <Text style={styles.detailTitle}>{longDayLabel(selected, language)}</Text>
               {selectedWorn.length === 0 ? (
                 <Notice>
                   {l('Bu günde kayıtlı giyim yok. Kombinde "Bugün giydim" basarak ekleyebilirsin.', 'No worn outfit recorded. Use "Wore today" on an outfit to log one.')}
@@ -173,18 +193,28 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: {
     width: `${100 / 7}%`,
-    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingVertical: 4,
+    gap: 3,
+  },
+  cellEmpty: { width: `${100 / 7}%`, height: 50 },
+  cellFuture: { opacity: 0.5 },
+  dayBubble: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 2,
   },
-  cellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
-  cellToday: { backgroundColor: colors.primarySoft, borderRadius: radius.sm },
-  cellSelected: { backgroundColor: colors.primary, borderRadius: radius.sm },
-  cellFuture: { opacity: 0.6 },
-  cellText: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  dayBubbleWorn: { backgroundColor: colors.primarySoft },
+  dayBubbleToday: { borderWidth: 1.5, borderColor: colors.primary },
+  dayBubbleSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  cellText: { color: colors.text, fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  cellTextWorn: { fontWeight: '900' },
   cellTextSelected: { color: colors.onPrimary, fontWeight: '900' },
-  cellDot: { position: 'absolute', bottom: 4, width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary },
+  cellDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary },
+  cellDotHidden: { backgroundColor: 'transparent' },
   summary: {
     padding: spacing.md,
     borderRadius: radius.md,

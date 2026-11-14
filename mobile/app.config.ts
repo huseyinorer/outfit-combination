@@ -58,6 +58,14 @@ const config: ExpoConfig = {
       {
         android: {
           usesCleartextTraffic: appEnvironment === 'development',
+          // arm64 covers modern phones, x86_64 keeps emulators such as BlueStacks working.
+          buildArchs: ['arm64-v8a', 'x86_64'],
+          // R8 strips the no-arg constructors ML Kit instantiates by reflection, so MlKitInitProvider
+          // fails with NoSuchMethodException and every segmenter call crashes in release builds.
+          extraProguardRules: [
+            '-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }',
+            '-keep class com.google.mlkit.**.*Registrar { <init>(); }',
+          ].join('\n'),
         },
       },
     ],

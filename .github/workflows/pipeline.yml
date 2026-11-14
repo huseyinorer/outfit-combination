@@ -61,26 +61,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle*', 'mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
       - name: Check whether this version has a healthy APK release
         id: release
         env:
@@ -113,6 +93,24 @@ jobs:
           fi
           echo "release_exists=$RELEASE_EXISTS" >> "$GITHUB_OUTPUT"
           echo "needs_build=$NEEDS_BUILD" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v6
+        if: steps.release.outputs.needs_build == 'true'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        if: steps.release.outputs.needs_build == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        if: steps.release.outputs.needs_build == 'true'
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Set up Gradle with dependency and build cache
+        if: steps.release.outputs.needs_build == 'true'
+        uses: gradle/actions/setup-gradle@v4
       - name: Install mobile dependencies
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile
@@ -142,15 +140,6 @@ jobs:
           echo "keystore sha256: $(sha256sum release.keystore | cut -d' ' -f1)"
           file release.keystore || true
           keytool -list -v -keystore release.keystore -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" | grep -E "Alias name|Certificate fingerprints|SHA1|SHA256" | head -20
-      - name: Print Gradle signing report
-        if: steps.release.outputs.needs_build == 'true'
-        working-directory: mobile/android
-        env:
-          ANDROID_KEYSTORE_FILE: release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:signingReport --no-daemon
       - name: Assemble release APK
         if: steps.release.outputs.needs_build == 'true'
         working-directory: mobile/android
@@ -165,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$STORE_FILE" || { echo "keystore missing at $STORE_FILE"; exit 1; }
-          ./gradlew assembleRelease --no-daemon --stacktrace \
+          ./gradlew assembleRelease --stacktrace --build-cache --parallel \
             -Pandroid.injected.signing.store.file="$STORE_FILE" \
             -Pandroid.injected.signing.store.password="$STORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
