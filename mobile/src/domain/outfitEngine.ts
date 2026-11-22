@@ -86,6 +86,9 @@ export function validateAiSuggestions(
 
     seen.add(key);
     return true;
+  }).map((candidate) => {
+    const top = byId.get(candidate.topId);
+    return candidate.outerwearId && top && isOuterLayer(top) ? { ...candidate, outerwearId: null } : candidate;
   });
 }
 
@@ -131,6 +134,17 @@ function scoreExtra(item: ClothingItem, triple: Triple, preferences: OutfitPrefe
   return score;
 }
 
+const OUTER_LAYER_WORDS = [
+  'ceket', 'mont', 'kaban', 'palto', 'trençkot', 'blazer', 'bomber', 'parka', 'yelek', 'hırka',
+  'overshirt', 'jacket', 'coat', 'trench', 'puffer', 'gilet', 'cardigan', 'shacket',
+];
+
+/** True when a top is itself a jacket/coat, so a separate outerwear piece would double up. */
+export function isOuterLayer(item: Pick<ClothingItem, 'name' | 'subType'>): boolean {
+  const text = normalize(`${item.subType} ${item.name}`);
+  return OUTER_LAYER_WORDS.some((word) => text.includes(word));
+}
+
 function pickExtra(
   pool: ClothingItem[],
   triple: Triple,
@@ -138,7 +152,8 @@ function pickExtra(
   mode: 'auto' | 'include' | 'exclude' | undefined,
 ): ClothingItem | null {
   if (mode === 'exclude') return null;
-  if (pool.length === 0) return mode === 'include' ? null : null;
+  if (pool.length === 0) return null;
+  if (mode !== 'include' && pool[0]?.category === 'outerwear' && isOuterLayer(triple.top)) return null;
   const sorted = [...pool].sort((a, b) => scoreExtra(b, triple, preferences) - scoreExtra(a, triple, preferences));
   return sorted[0] ?? null;
 }
@@ -184,10 +199,21 @@ export function buildLocalSuggestions(
   preferences: OutfitPreferences,
   excludedKeys = new Set<string>(),
   extras: OutfitRequestExtras = {},
+  anchorId: string | null = null,
 ): OutfitSuggestion[] {
-  const tops = items.filter((item) => item.category === 'top');
-  const bottoms = items.filter((item) => item.category === 'bottom');
-  const shoes = items.filter((item) => item.category === 'shoes');
+  const anchor = anchorId ? items.find((item) => item.id === anchorId) ?? null : null;
+  // A required-category anchor narrows its slot to itself; an extra anchor is forced into its slot.
+  const slot = (category: Category) => anchor && anchor.category === category
+    ? [anchor]
+    : items.filter((item) => item.category === category);
+  const tops = anchor?.category === 'outerwear'
+    ? (() => {
+      const plain = slot('top').filter((item) => !isOuterLayer(item));
+      return plain.length > 0 ? plain : slot('top');
+    })()
+    : slot('top');
+  const bottoms = slot('bottom');
+  const shoes = slot('shoes');
   const hats = items.filter((item) => item.category === 'hat');
   const accessories = items.filter((item) => item.category === 'accessory');
   const outerwear = items.filter((item) => item.category === 'outerwear');
@@ -228,9 +254,9 @@ export function buildLocalSuggestions(
 
   const english = ['Any', 'Daily', 'Work/office', 'Meeting friends', 'Dinner', 'Special occasion'].includes(preferences.destination);
   return selected.map((triple) => makeLocalSuggestion(triple, english, {
-    hat: pickExtra(hats, triple, preferences, extras.hat),
-    accessory: pickExtra(accessories, triple, preferences, extras.accessory),
-    outerwear: pickExtra(outerwear, triple, preferences, extras.outerwear),
+    hat: anchor?.category === 'hat' ? anchor : pickExtra(hats, triple, preferences, extras.hat),
+    accessory: anchor?.category === 'accessory' ? anchor : pickExtra(accessories, triple, preferences, extras.accessory),
+    outerwear: anchor?.category === 'outerwear' ? anchor : pickExtra(outerwear, triple, preferences, extras.outerwear),
   }));
 }
 
@@ -240,20 +266,29 @@ export function completeSuggestions(
   aiCandidates: OutfitSuggestion[] = [],
   excludedKeys = new Set<string>(),
   extras: OutfitRequestExtras = {},
+  anchorId: string | null = null,
 ): OutfitSuggestion[] {
-  const possible = countPossibleOutfits(items);
+  const anchor = anchorId ? items.find((item) => item.id === anchorId) ?? null : null;
+  const possible = anchor && (REQUIRED_CATEGORIES as readonly Category[]).includes(anchor.category)
+    ? countPossibleOutfits(items.filter((item) => item.category !== anchor.category || item.id === anchor.id))
+    : countPossibleOutfits(items);
   if (possible === 0) return [];
 
+  const containsAnchor = (suggestion: OutfitSuggestion) => !anchor || [
+    suggestion.topId, suggestion.bottomId, suggestion.shoeId,
+    suggestion.hatId, suggestion.accessoryId, suggestion.outerwearId,
+  ].includes(anchor.id);
   const target = Math.min(3, possible);
   const validAi = validateAiSuggestions(items, aiCandidates)
+    .filter(containsAnchor)
     .filter((suggestion) => !excludedKeys.has(outfitKey(suggestion)))
     .slice(0, target)
     .map((suggestion) => ({ ...suggestion, source: 'ai' as const }));
   const seen = new Set(validAi.map(outfitKey));
   const localExcluded = new Set([...excludedKeys, ...seen]);
-  let local = buildLocalSuggestions(items, preferences, localExcluded, extras);
+  let local = buildLocalSuggestions(items, preferences, localExcluded, extras, anchorId);
   if (validAi.length + local.length < target && excludedKeys.size > 0) {
-    local = [...local, ...buildLocalSuggestions(items, preferences, seen, extras)
+    local = [...local, ...buildLocalSuggestions(items, preferences, seen, extras, anchorId)
       .filter((suggestion) => !local.some((existing) => outfitKey(existing) === outfitKey(suggestion)))];
   }
   return [...validAi, ...local].slice(0, target);

@@ -10,6 +10,10 @@ import type {
   OutfitSuggestion,
   SuggestedOutfitHistoryEntry,
   WornOutfit,
+  OutfitDislike,
+  OutfitDislikeReason,
+  ShoppingHistoryEntry,
+  ShoppingLook,
 } from '../domain/types';
 
 type ClothingRow = Omit<
@@ -54,6 +58,9 @@ export async function initializeDatabase(): Promise<void> {
       styleTags TEXT NOT NULL DEFAULT '[]',
       seasons TEXT NOT NULL DEFAULT '[]',
       description TEXT NOT NULL DEFAULT '',
+      fit TEXT NOT NULL DEFAULT '',
+      fabric TEXT NOT NULL DEFAULT '',
+      formality TEXT NOT NULL DEFAULT '',
       photoUri TEXT NOT NULL,
       thumbnailUri TEXT NULL,
       cutoutUri TEXT NULL,
@@ -141,6 +148,17 @@ export async function initializeDatabase(): Promise<void> {
       ON suggestion_history(ownerId, suggestedAt DESC, position ASC);
     CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_batch
       ON suggestion_history(ownerId, batchId);
+    CREATE TABLE IF NOT EXISTS shopping_history (
+      batchId TEXT PRIMARY KEY NOT NULL,
+      ownerId TEXT NOT NULL,
+      lookJson TEXT NOT NULL,
+      destination TEXT NOT NULL,
+      look TEXT NOT NULL,
+      tone TEXT NOT NULL,
+      suggestedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_shopping_history_owner_date
+      ON shopping_history(ownerId, suggestedAt DESC);
   `);
 
   const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(clothing_items)');
@@ -151,11 +169,17 @@ export async function initializeDatabase(): Promise<void> {
   if (!names.has('photoHash')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN photoHash TEXT NULL;');
   if (!names.has('price')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN price REAL NULL;');
   if (!names.has('currency')) await database.execAsync('ALTER TABLE clothing_items ADD COLUMN currency TEXT NULL;');
+  for (const column of ['fit', 'fabric', 'formality'] as const) {
+    if (!names.has(column)) await database.execAsync(`ALTER TABLE clothing_items ADD COLUMN ${column} TEXT NOT NULL DEFAULT '';`);
+  }
 
   const favoriteColumns = new Set((await database.getAllAsync<{ name: string }>('PRAGMA table_info(favorite_outfits)')).map((column) => column.name));
   if (!favoriteColumns.has('ownerId')) await database.execAsync("ALTER TABLE favorite_outfits ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
   const correctionColumns = new Set((await database.getAllAsync<{ name: string }>('PRAGMA table_info(ai_corrections)')).map((column) => column.name));
   if (!correctionColumns.has('ownerId')) await database.execAsync("ALTER TABLE ai_corrections ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local';");
+
+  const feedbackColumns = new Set((await database.getAllAsync<{ name: string }>('PRAGMA table_info(outfit_feedback)')).map((column) => column.name));
+  if (!feedbackColumns.has('reason')) await database.execAsync('ALTER TABLE outfit_feedback ADD COLUMN reason TEXT NULL;');
 
   for (const table of ['favorite_outfits', 'worn_outfits', 'suggestion_history'] as const) {
     const cols = new Set((await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`)).map((column) => column.name));
@@ -188,6 +212,9 @@ export async function initializeDatabase(): Promise<void> {
         styleTags TEXT NOT NULL DEFAULT '[]',
         seasons TEXT NOT NULL DEFAULT '[]',
         description TEXT NOT NULL DEFAULT '',
+        fit TEXT NOT NULL DEFAULT '',
+        fabric TEXT NOT NULL DEFAULT '',
+        formality TEXT NOT NULL DEFAULT '',
         photoUri TEXT NOT NULL,
         thumbnailUri TEXT NULL,
         cutoutUri TEXT NULL,
@@ -200,11 +227,11 @@ export async function initializeDatabase(): Promise<void> {
       );
       INSERT INTO clothing_items_rebuild (
         id, ownerId, category, name, subType, primaryColor, secondaryColors,
-        pattern, styleTags, seasons, description, photoUri, thumbnailUri,
+        pattern, styleTags, seasons, description, fit, fabric, formality, photoUri, thumbnailUri,
         cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
       )
       SELECT id, ownerId, category, name, subType, primaryColor, secondaryColors,
-        pattern, styleTags, seasons, description, photoUri, thumbnailUri,
+        pattern, styleTags, seasons, description, fit, fabric, formality, photoUri, thumbnailUri,
         cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
       FROM clothing_items;
       DROP TABLE clothing_items;
@@ -327,6 +354,9 @@ const fromRow = (row: ClothingRow): ClothingItem => {
     seasons: safeArray(row.seasons),
     price: row.price ?? null,
     currency: row.currency ?? null,
+    fit: row.fit ?? '',
+    fabric: row.fabric ?? '',
+    formality: row.formality ?? '',
   };
 };
 
@@ -363,6 +393,7 @@ export async function activateWardrobeOwner(
           await database.runAsync('UPDATE outfit_feedback SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           await database.runAsync('UPDATE worn_outfits SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           await database.runAsync('UPDATE suggestion_history SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
+          await database.runAsync('UPDATE shopping_history SET ownerId = ? WHERE ownerId = ?', nextOwner, LOCAL_OWNER);
           for (const key of ['pending_draft', 'pending_queue']) {
             await database.runAsync(
               `INSERT OR REPLACE INTO app_settings(key, value)
@@ -399,6 +430,7 @@ export async function moveAccountWardrobeToLocal(userId: string): Promise<void> 
     await database.runAsync('UPDATE outfit_feedback SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     await database.runAsync('UPDATE worn_outfits SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     await database.runAsync('UPDATE suggestion_history SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
+    await database.runAsync('UPDATE shopping_history SET ownerId = ? WHERE ownerId = ?', LOCAL_OWNER, sourceOwner);
     for (const key of ['pending_draft', 'pending_queue']) {
       const localKey = `${key}:${LOCAL_OWNER}`;
       const sourceKey = `${key}:${sourceOwner}`;
@@ -435,8 +467,8 @@ export async function insertClothing(item: ClothingItem): Promise<void> {
   await database.runAsync(
     `INSERT INTO clothing_items (
       id, ownerId, category, name, subType, primaryColor, secondaryColors, pattern,
-      styleTags, seasons, description, photoUri, thumbnailUri, cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      styleTags, seasons, description, fit, fabric, formality, photoUri, thumbnailUri, cutoutUri, photoHash, price, currency, createdAt, updatedAt, deletedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     item.id,
     activeOwnerId,
     item.category,
@@ -448,6 +480,9 @@ export async function insertClothing(item: ClothingItem): Promise<void> {
     JSON.stringify(item.styleTags),
     JSON.stringify(item.seasons),
     item.description,
+    item.fit ?? '',
+    item.fabric ?? '',
+    item.formality ?? '',
     item.photoUri,
     item.thumbnailUri,
     item.cutoutUri,
@@ -464,7 +499,7 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
   await database.runAsync(
     `UPDATE clothing_items SET
       category = ?, name = ?, subType = ?, primaryColor = ?, secondaryColors = ?,
-      pattern = ?, styleTags = ?, seasons = ?, description = ?, photoUri = ?,
+      pattern = ?, styleTags = ?, seasons = ?, description = ?, fit = ?, fabric = ?, formality = ?, photoUri = ?,
       thumbnailUri = ?, cutoutUri = ?, photoHash = ?, price = ?, currency = ?, updatedAt = ? WHERE id = ? AND ownerId = ?`,
     item.category,
     item.name,
@@ -475,6 +510,9 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
     JSON.stringify(item.styleTags),
     JSON.stringify(item.seasons),
     item.description,
+    item.fit ?? '',
+    item.fabric ?? '',
+    item.formality ?? '',
     item.photoUri,
     item.thumbnailUri,
     item.cutoutUri,
@@ -690,20 +728,47 @@ export async function findClothingByPhotoHash(photoHash: string): Promise<Clothi
 export async function setOutfitFeedback(
   suggestion: OutfitSuggestion,
   value: OutfitFeedbackValue,
+  reason: OutfitDislikeReason | null = null,
 ): Promise<void> {
   const database = await db();
   await database.runAsync(
-    `INSERT INTO outfit_feedback(ownerId, topId, bottomId, shoeId, value, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO outfit_feedback(ownerId, topId, bottomId, shoeId, value, reason, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(ownerId, topId, bottomId, shoeId) DO UPDATE SET
-       value = excluded.value, createdAt = excluded.createdAt`,
+       value = excluded.value, reason = excluded.reason, createdAt = excluded.createdAt`,
     activeOwnerId,
     suggestion.topId,
     suggestion.bottomId,
     suggestion.shoeId,
     value,
+    value === 'dislike' ? reason : null,
     new Date().toISOString(),
   );
+}
+
+/** Most recent dislikes with their reason, for the AI request. */
+export async function listDislikedOutfits(limit = 30): Promise<OutfitDislike[]> {
+  const database = await db();
+  return database.getAllAsync<OutfitDislike>(
+    `SELECT topId, bottomId, shoeId, reason FROM outfit_feedback
+     WHERE ownerId = ? AND value = 'dislike'
+     ORDER BY createdAt DESC LIMIT ?`,
+    activeOwnerId,
+    Math.max(1, Math.min(limit, 100)),
+  );
+}
+
+export async function getOutfitDislikeReason(suggestion: OutfitSuggestion): Promise<OutfitDislikeReason | null> {
+  const database = await db();
+  const row = await database.getFirstAsync<{ reason: OutfitDislikeReason | null }>(
+    `SELECT reason FROM outfit_feedback
+     WHERE ownerId = ? AND topId = ? AND bottomId = ? AND shoeId = ? AND value = 'dislike'`,
+    activeOwnerId,
+    suggestion.topId,
+    suggestion.bottomId,
+    suggestion.shoeId,
+  );
+  return row?.reason ?? null;
 }
 
 export async function getOutfitFeedback(suggestion: OutfitSuggestion): Promise<OutfitFeedbackValue | null> {
@@ -800,6 +865,57 @@ export async function saveSuggestionHistory(
   return batchId;
 }
 
+/**
+ * Stores a shopping look under the batch of the wardrobe suggestions it came with (or its own
+ * batch when there were none), so history can reopen both together.
+ */
+export async function saveShoppingHistory(
+  batchId: string | null,
+  look: ShoppingLook,
+  preferences: OutfitPreferences,
+  suggestedAt = new Date(),
+): Promise<void> {
+  const database = await db();
+  const iso = suggestedAt.toISOString();
+  await database.runAsync(
+    `INSERT OR REPLACE INTO shopping_history(batchId, ownerId, lookJson, destination, look, tone, suggestedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    batchId ?? `${activeOwnerId}|${iso}|${Math.random().toString(36).slice(2, 10)}`,
+    activeOwnerId,
+    JSON.stringify(look),
+    preferences.destination,
+    preferences.look,
+    preferences.tone,
+    iso,
+  );
+}
+
+export async function listShoppingHistory(limit = 50): Promise<ShoppingHistoryEntry[]> {
+  const database = await db();
+  const rows = await database.getAllAsync<{
+    batchId: string; lookJson: string; destination: string; look: string; tone: string; suggestedAt: string;
+  }>(
+    `SELECT batchId, lookJson, destination, look, tone, suggestedAt FROM shopping_history
+     WHERE ownerId = ? ORDER BY suggestedAt DESC LIMIT ?`,
+    activeOwnerId,
+    Math.max(1, Math.min(limit, 100)),
+  );
+  const entries: ShoppingHistoryEntry[] = [];
+  for (const row of rows) {
+    try {
+      entries.push({
+        batchId: row.batchId,
+        suggestedAt: row.suggestedAt,
+        preferences: { destination: row.destination, look: row.look, tone: row.tone },
+        look: JSON.parse(row.lookJson) as ShoppingLook,
+      });
+    } catch {
+      // A corrupt row is skipped rather than breaking the whole history screen.
+    }
+  }
+  return entries;
+}
+
 export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedOutfitHistoryEntry[]> {
   const database = await db();
   const rows = await database.getAllAsync<SuggestionHistoryRow>(
@@ -847,6 +963,7 @@ export async function clearAllUserData(): Promise<void> {
     await database.runAsync('DELETE FROM outfit_feedback');
     await database.runAsync('DELETE FROM worn_outfits');
     await database.runAsync('DELETE FROM suggestion_history');
+    await database.runAsync('DELETE FROM shopping_history');
     await database.runAsync('DELETE FROM favorite_outfits');
     await database.runAsync('DELETE FROM clothing_items');
     await database.runAsync('DELETE FROM ai_corrections');

@@ -3,12 +3,14 @@ import { type ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 
-export function ClothingCard({ item, onPress, onMenu, width, wears }: {
+export function ClothingCard({ item, onPress, onMenu, width, wears, incomplete }: {
   item: ClothingItem;
   onPress: () => void;
   onMenu: () => void;
   width: number;
   wears?: number;
+  /** Shows a "missing details" badge on the photo. */
+  incomplete?: boolean;
 }) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
@@ -32,6 +34,13 @@ export function ClothingCard({ item, onPress, onMenu, width, wears }: {
         style={styles.image}
         resizeMode="cover"
       />
+      {incomplete ? (
+        <View style={styles.imageOverlay} pointerEvents="none">
+          <View style={styles.incompleteBadge} accessibilityLabel={l('Eksik bilgi var', 'Missing details')}>
+            <Text style={styles.incompleteBadgeText}>{l('⚠ Eksik bilgi', '⚠ Missing info')}</Text>
+          </View>
+        </View>
+      ) : null}
       {wearCount > 0 ? (
         <View style={styles.wearBadge}>
           <Text style={styles.wearBadgeText}>×{wearCount}</Text>
@@ -100,5 +109,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wearBadgeText: { color: colors.imageActionText, fontSize: 12, fontWeight: '900' },
+  imageOverlay: { position: 'absolute', left: 0, right: 0, top: 0, aspectRatio: 0.88 },
+  incompleteBadge: {
+    position: 'absolute',
+    left: spacing.xs,
+    bottom: spacing.xs,
+    paddingHorizontal: 8,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  incompleteBadgeText: { color: colors.text, fontSize: 11, fontWeight: '900' },
 });
 

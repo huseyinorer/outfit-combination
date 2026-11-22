@@ -7,11 +7,13 @@ export function ClothingActionSheet({
   item,
   onClose,
   onEdit,
+  onOutfitWith,
   onDelete,
 }: {
   item: ClothingItem | null;
   onClose: () => void;
   onEdit: (item: ClothingItem) => void;
+  onOutfitWith: (item: ClothingItem) => void;
   onDelete: (item: ClothingItem) => void;
 }) {
   const { language, t } = useI18n();
@@ -50,6 +52,22 @@ export function ClothingActionSheet({
                 </Text>
               </View>
             </View>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                onClose();
+                onOutfitWith(item);
+              }}
+              style={({ pressed }) => [styles.action, styles.outfitAction, pressed && styles.pressed]}
+            >
+              <Text style={styles.outfitIcon}>✦</Text>
+              <View style={styles.actionCopy}>
+                <Text style={styles.actionTitle}>{l('Bu parçayla kombin yap', 'Build outfits with this')}</Text>
+                <Text style={styles.actionText}>{l('Her öneri bu parçanın etrafında kurulur', 'Every suggestion is built around this piece')}</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
 
             <Pressable
               accessibilityRole="button"
@@ -136,6 +154,8 @@ const styles = StyleSheet.create({
   actionTitle: { color: colors.text, fontSize: 16, fontWeight: '800' },
   actionText: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   chevron: { color: colors.primary, fontSize: 28, fontWeight: '500' },
+  outfitAction: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  outfitIcon: { width: 28, textAlign: 'center', color: colors.primary, fontSize: 20, fontWeight: '900' },
   editIcon: {
     width: 28,
     height: 28,

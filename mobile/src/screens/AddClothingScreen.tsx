@@ -25,6 +25,7 @@ import {
   CATEGORIES,
   EMPTY_ATTRIBUTES,
   type Category,
+  type ClothingAttributes,
   type ClothingDraft,
   type ClothingItem,
 } from '../domain/types';
@@ -85,6 +86,9 @@ export function AddClothingScreen(props: Props) {
   const [learnedApplied, setLearnedApplied] = useState(false);
   const [lastSource, setLastSource] = useState<'camera' | 'gallery'>('camera');
   const [bgCleaning, setBgCleaning] = useState(false);
+  // "AI or manual?" is asked once; when remembered, new photos start that way automatically.
+  const [rememberedMode, setRememberedMode] = useState<'ai' | 'manual' | null>(null);
+  const [rememberChoice, setRememberChoice] = useState(true);
   const bgRemovalAvailable = isBackgroundRemovalAvailable();
   const savingRef = useRef(false);
   const analysisRequestRef = useRef<AbortController | null>(null);
@@ -97,6 +101,9 @@ export function AddClothingScreen(props: Props) {
   useEffect(() => {
     getSetting('last_photo_source').then((value) => {
       if (value === 'gallery' || value === 'camera') setLastSource(value);
+    });
+    getSetting('add_analysis_mode').then((value) => {
+      if (value === 'ai' || value === 'manual') setRememberedMode(value);
     });
     prepareBackgroundRemoval();
     return () => analysisRequestRef.current?.abort();
@@ -118,6 +125,34 @@ export function AddClothingScreen(props: Props) {
     setDraft(next);
     await props.onPersistDraft(next);
   };
+
+  const chooseMode = async (mode: 'ai' | 'manual', current: ClothingDraft) => {
+    if (rememberChoice) {
+      setRememberedMode(mode);
+      await setSetting('add_analysis_mode', mode);
+    }
+    if (mode === 'ai') await runAnalysis(current);
+    else await continueManually(current);
+  };
+
+  const forgetMode = async () => {
+    setRememberedMode(null);
+    await setSetting('add_analysis_mode', '');
+  };
+
+  // Fields whose value still equals what the AI suggested get a "✦ AI" mark in the form.
+  const aiFilled = useMemo(() => {
+    const filled = new Set<keyof ClothingAttributes>();
+    const ai = draft?.aiAttributes;
+    if (!ai || !draft) return filled;
+    for (const key of Object.keys(ai) as Array<keyof ClothingAttributes>) {
+      const aiValue = ai[key];
+      const current = draft.attributes[key];
+      const empty = Array.isArray(aiValue) ? aiValue.length === 0 : !aiValue;
+      if (!empty && JSON.stringify(aiValue) === JSON.stringify(current)) filled.add(key);
+    }
+    return filled;
+  }, [draft]);
 
   const runAnalysis = async (current: ClothingDraft) => {
     if (!await props.onRequestAiAccess()) {
@@ -143,6 +178,9 @@ export function AddClothingScreen(props: Props) {
         styleTags: result.styleTags ?? [],
         seasons: result.seasons ?? [],
         description: result.description ?? '',
+        fit: result.fit ?? '',
+        fabric: result.fabric ?? '',
+        formality: result.formality ?? '',
       };
       const attributes = applyLearnedCorrections(aiAttributes, await listCorrectionRules(analyzingDraft.category));
       setLearnedApplied(
@@ -160,10 +198,8 @@ export function AddClothingScreen(props: Props) {
         analysisError: null,
         analysisMode: 'ai',
       };
+      // A category conflict is shown once, in the page itself (no extra pop-up).
       await persist(analyzed);
-      if (result.categoryConflict && result.detectedCategory && result.detectedCategory !== analyzed.category) {
-        promptCategoryConfirm(analyzed, result.detectedCategory);
-      }
     } catch (error) {
       if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : l('Analiz servisine ulaşılamadı.', 'The analysis service is unavailable.');
@@ -208,28 +244,6 @@ export function AddClothingScreen(props: Props) {
       category: detected,
       categoryConflict: false,
     });
-  };
-
-  const promptCategoryConfirm = (current: ClothingDraft, detected: Category) => {
-    const detectedLabel = categoryLabel(detected);
-    const currentLabel = categoryLabel(current.category);
-    Alert.alert(
-      l(`AI bunu "${detectedLabel}" olarak algıladı`, `AI detected this as "${detectedLabel}"`),
-      l(
-        `Sen "${currentLabel}" kategorisini seçmiştin. Kategoriyi "${detectedLabel}" olarak güncellemek ister misin? Diğer bilgiler korunur.`,
-        `You chose "${currentLabel}". Would you like to update the category to "${detectedLabel}"? Other details are kept.`,
-      ),
-      [
-        {
-          text: l(`Hayır, "${currentLabel}" kalsın`, `No, keep "${currentLabel}"`),
-          style: 'cancel',
-        },
-        {
-          text: l(`Evet, "${detectedLabel}" olarak güncelle`, `Yes, update to "${detectedLabel}"`),
-          onPress: () => { void applyDetectedCategory(current, detected); },
-        },
-      ],
-    );
   };
 
   const acceptAsset = async (uri: string) => {
@@ -387,6 +401,41 @@ export function AddClothingScreen(props: Props) {
       ? 'AI kıyafetin renk ve tarzını inceliyor…'
       : 'AI yanıtı biraz uzun sürüyor; fotoğrafın ve taslağın güvende.';
 
+  // Photo for which the remembered choice was already applied, so a re-render while the consent
+  // dialog is open cannot start a second analysis.
+  const autoStartedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draft || draft.analysisMode !== 'undecided' || !rememberedMode || analyzing || busy) return;
+    if (autoStartedForRef.current === draft.photoUri) return;
+    autoStartedForRef.current = draft.photoUri;
+    if (rememberedMode === 'ai' && props.analysisRemaining !== 0) void runAnalysis(draft);
+    else void continueManually(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.id, draft?.photoUri, draft?.analysisMode, rememberedMode, busy, analyzing]);
+
+  const advanceQueue = async () => {
+    const [next, ...remaining] = queue;
+    setQueue(remaining);
+    await props.onPersistQueue(remaining);
+    if (next) {
+      setCategory(next.category);
+      setLearnedApplied(false);
+      await persist(next);
+    } else {
+      setDraft(null);
+      await props.onPersistDraft(null);
+      props.onComplete();
+    }
+  };
+
+  const skipCurrent = async () => {
+    if (!draft || savingRef.current) return;
+    analysisRequestRef.current?.abort();
+    setAnalyzing(false);
+    deleteStoredImage(draft.photoUri);
+    await advanceQueue();
+  };
+
   const save = async () => {
     if (!draft || savingRef.current) return;
     savingRef.current = true;
@@ -413,18 +462,7 @@ export function AddClothingScreen(props: Props) {
         // Öğrenme kaydı ana kıyafet kaydını başarısız göstermesin.
       }
       deleteStoredImage(draft.photoUri);
-      const [next, ...remaining] = queue;
-      setQueue(remaining);
-      await props.onPersistQueue(remaining);
-      if (next) {
-        setCategory(next.category);
-        setLearnedApplied(false);
-        await persist(next);
-      } else {
-        setDraft(null);
-        await props.onPersistDraft(null);
-        props.onComplete();
-      }
+      await advanceQueue();
     } catch (error) {
       Alert.alert(l('Kaydedilemedi', 'Could not save'), error instanceof Error ? error.message : t('common.unknownError'));
     } finally {
@@ -521,6 +559,30 @@ export function AddClothingScreen(props: Props) {
                 {l('Fotoğrafın hazır. AI renk, tür ve tarz alanlarını senin için doldurabilir; istersen bilgileri ücretsiz olarak kendin girebilirsin.', 'Your photo is ready. AI can fill in color, type, and style, or you can enter the details yourself for free.')}
               </Notice>
             ) : null}
+            {analysisMode === 'undecided' && !rememberedMode ? (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: rememberChoice }}
+                onPress={() => setRememberChoice((value) => !value)}
+                style={styles.rememberRow}
+              >
+                <View style={[styles.checkbox, rememberChoice && styles.checkboxOn]}>
+                  {rememberChoice ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                </View>
+                <Text style={styles.rememberText}>
+                  {l('Seçimimi hatırla; sonraki fotoğraflarda bir daha sorma', 'Remember my choice; don’t ask again for the next photos')}
+                </Text>
+              </Pressable>
+            ) : null}
+            {analysisMode !== 'undecided' && rememberedMode ? (
+              <Pressable accessibilityRole="button" onPress={() => void forgetMode()} hitSlop={6}>
+                <Text style={styles.rememberedText}>
+                  {rememberedMode === 'ai'
+                    ? l('Yeni fotoğraflar otomatik olarak AI ile analiz ediliyor · Değiştir', 'New photos are analyzed with AI automatically · Change')
+                    : l('Yeni fotoğraflarda bilgileri elle giriyorsun · Değiştir', 'You enter details manually for new photos · Change')}
+                </Text>
+              </Pressable>
+            ) : null}
             {analysisMode === 'undecided' && props.analysisRemaining === 0 ? (
               <Notice tone="error">{l('AI analiz kredin bitti. Fotoğrafın güvende; bilgileri kendin girerek ücretsiz devam edebilirsin.', 'Your AI analysis credits are used up. Your photo is safe; enter the details yourself for free.')}</Notice>
             ) : null}
@@ -581,13 +643,17 @@ export function AddClothingScreen(props: Props) {
                 {analysisMode === 'undecided' ? (
                   <Notice>{l('AI ile otomatik doldurmayı veya bilgileri kendin girmeyi seç.', 'Choose AI autofill or enter the details yourself.')}</Notice>
                 ) : !analyzing ? (
-                  <ClothingForm value={draft.attributes} onChange={(attributes) => persist({ ...draft, attributes })} />
+                  <ClothingForm value={draft.attributes} aiFilled={aiFilled} onChange={(attributes) => persist({ ...draft, attributes })} />
                 ) : (
                   <Notice>{l('Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.', 'Fields will be editable when analysis finishes, or you can continue manually now.')}</Notice>
                 )}
               </View>
             </View>
-            <Text style={styles.storageNote}>{l('Fotoğraf kalıcı uygulama alanına alındı. Kaydet düğmesine art arda basmak ikinci kayıt oluşturmaz.', 'The photo is in persistent app storage. Tapping Save repeatedly will not create a duplicate record.')}</Text>
+            {queue.length > 0 ? (
+              <Pressable accessibilityRole="button" onPress={() => void skipCurrent()} disabled={busy} hitSlop={6} style={styles.skipLink}>
+                <Text style={styles.skipText}>{l('Bu fotoğrafı atla ve sonrakine geç ›', 'Skip this photo and go to the next ›')}</Text>
+              </Pressable>
+            ) : null}
           </>
         ) : null}
         </ContentFrame>
@@ -596,10 +662,10 @@ export function AddClothingScreen(props: Props) {
         <StickyFooter>
           {analysisMode === 'undecided' ? (
             <>
-              <SecondaryButton title={l('Bilgileri kendim gireceğim · Ücretsiz', 'Enter details myself · Free')} onPress={() => void continueManually(draft)} disabled={busy} style={styles.footerButton} />
+              <SecondaryButton title={l('Bilgileri kendim gireceğim · Ücretsiz', 'Enter details myself · Free')} onPress={() => void chooseMode('manual', draft)} disabled={busy} style={styles.footerButton} />
               <PrimaryButton
                 title={l('✦ AI ile analiz et · 1 🪙', '✦ Analyze with AI · 1 🪙')}
-                onPress={() => void runAnalysis(draft)}
+                onPress={() => void chooseMode('ai', draft)}
                 loading={analyzing}
                 disabled={busy || props.analysisRemaining === 0}
                 style={styles.footerButton}
@@ -611,7 +677,15 @@ export function AddClothingScreen(props: Props) {
             <SecondaryButton title={l('Fotoğrafı değiştir', 'Replace photo')} onPress={() => openSource(lastSource)} disabled={busy} style={styles.footerButton} />
           )}
           {analysisMode !== 'undecided' ? (
-            <PrimaryButton title={t('common.save')} onPress={save} loading={busy} disabled={analyzing} style={styles.footerButton} />
+            <PrimaryButton
+              title={queue.length > 0 && batchTotal > 0
+                ? l(`Kaydet ve sonraki (${batchTotal - batchRemaining + 1}/${batchTotal})`, `Save & next (${batchTotal - batchRemaining + 1}/${batchTotal})`)
+                : t('common.save')}
+              onPress={save}
+              loading={busy}
+              disabled={analyzing}
+              style={styles.footerButton}
+            />
           ) : null}
         </StickyFooter>
       ) : null}
@@ -621,6 +695,14 @@ export function AddClothingScreen(props: Props) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 40 },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  checkboxOn: { borderColor: colors.primary, backgroundColor: colors.primary },
+  checkboxMark: { color: colors.onPrimary, fontSize: 13, fontWeight: '900' },
+  rememberText: { flex: 1, color: colors.text, fontSize: 13 },
+  rememberedText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  skipLink: { alignSelf: 'center', paddingVertical: spacing.sm },
+  skipText: { color: colors.muted, fontSize: 13, fontWeight: '800' },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 32 },
   content: { padding: spacing.md, gap: spacing.md },

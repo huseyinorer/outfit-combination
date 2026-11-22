@@ -23,6 +23,11 @@ export interface ClothingAttributes {
   styleTags: string[];
   seasons: string[];
   description: string;
+  /** Cut/volume, e.g. slim, regular, relaxed, oversized. Optional for items saved before it existed. */
+  fit?: string;
+  fabric?: string;
+  /** "1" (very casual) … "5" (formal), or empty. */
+  formality?: string;
 }
 
 export interface ClothingItem extends ClothingAttributes {
@@ -75,6 +80,18 @@ export interface OutfitRequestExtras {
   outerwear?: 'auto' | 'include' | 'exclude';
 }
 
+export interface OutfitRequestContext {
+  temperatureC?: number;
+  isRaining?: boolean;
+  season?: string;
+}
+
+export interface OutfitKeyTriple {
+  topId: string;
+  bottomId: string;
+  shoeId: string;
+}
+
 export interface FavoriteOutfit extends OutfitSuggestion {
   id: string;
   createdAt: string;
@@ -84,9 +101,67 @@ export interface OutfitResult {
   suggestions: OutfitSuggestion[];
   usedFallback: boolean;
   warning?: string;
+  shopping?: ShoppingLook | null;
+}
+
+export interface ShoppingProduct {
+  name: string;
+  store: string;
+  price: string;
+  url: string;
+  /** Preview image from the product page; empty when the store did not expose one. */
+  imageUrl?: string;
+}
+
+export interface ShoppingHistoryEntry {
+  batchId: string;
+  suggestedAt: string;
+  preferences: OutfitPreferences;
+  look: ShoppingLook;
+}
+
+/** Everything the results screen needs, as produced by the outfit screen. */
+export interface OutfitResultsPayload {
+  suggestions: OutfitSuggestion[];
+  warning?: string;
+  preferences: OutfitPreferences;
+  anchorId?: string | null;
+  shopping?: ShoppingLook | null;
+  extras?: OutfitRequestExtras;
+  /** IDs of the pieces the request could use (weather filter); null means the whole wardrobe. */
+  poolIds?: string[] | null;
+}
+
+/** One piece to buy: what it should be, products found for it and store search links. */
+export interface ShoppingPiece {
+  category: Category;
+  idealItem: { name: string; description: string; searchQuery: string };
+  products: ShoppingProduct[];
+  searchLinks: Array<{ label: string; url: string }>;
+}
+
+/** One outfit where the `shopCategories` pieces are to be bought; other IDs come from the wardrobe. */
+export interface ShoppingLook {
+  shopCategories: Category[];
+  title: string;
+  reason: string;
+  topId?: string | null;
+  bottomId?: string | null;
+  shoeId?: string | null;
+  outerwearId?: string | null;
+  hatId?: string | null;
+  accessoryId?: string | null;
+  pieces: ShoppingPiece[];
 }
 
 export type OutfitFeedbackValue = 'like' | 'dislike';
+
+/** Why the user disliked an outfit; sent to the AI so it learns the reason, not just the combo. */
+export type OutfitDislikeReason = 'colors' | 'occasion' | 'weather' | 'style';
+
+export interface OutfitDislike extends OutfitKeyTriple {
+  reason: OutfitDislikeReason | null;
+}
 
 export interface WornOutfit extends OutfitSuggestion {
   id: string;
@@ -118,5 +193,8 @@ export const EMPTY_ATTRIBUTES: ClothingAttributes = {
   styleTags: [],
   seasons: [],
   description: '',
+  fit: '',
+  fabric: '',
+  formality: '',
 };
 

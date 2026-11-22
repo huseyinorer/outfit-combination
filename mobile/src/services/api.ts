@@ -6,9 +6,13 @@ import type {
   Category,
   ClothingAttributes,
   ClothingItem,
+  OutfitDislike,
+  OutfitKeyTriple,
   OutfitPreferences,
+  OutfitRequestContext,
   OutfitResult,
   OutfitSuggestion,
+  ShoppingLook,
 } from '../domain/types';
 import { accountAuthenticatedFetch } from './accountAuth';
 import type { AppLanguage } from '../locales';
@@ -120,6 +124,9 @@ const toApiItem = (item: ClothingItem) => ({
   styleTags: item.styleTags,
   seasons: item.seasons,
   description: item.description,
+  fit: item.fit ?? '',
+  fabric: item.fabric ?? '',
+  formality: item.formality ?? '',
 });
 
 export async function requestOutfits(
@@ -128,11 +135,22 @@ export async function requestOutfits(
   wardrobe: ClothingItem[],
   language: AppLanguage,
   extras?: { hat?: string; accessory?: string; outerwear?: string },
+  context?: OutfitRequestContext,
+  avoid: OutfitKeyTriple[] = [],
+  options: {
+    anchorId?: string | null;
+    note?: string;
+    disliked?: OutfitDislike[];
+    shopCategories?: Category[];
+    signal?: AbortSignal;
+  } = {},
 ): Promise<OutfitResult> {
   checkedBaseUrl(baseUrl, language);
   const controller = new AbortController();
-  // Allow the first request to include a possible Render Free cold start.
-  const timeout = setTimeout(() => controller.abort(), 90_000);
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  // Covers a possible Render Free cold start plus a reasoning model (and one server-side retry).
+  const timeout = setTimeout(() => controller.abort(), 180_000);
   try {
     // Bu gövde bilinçli olarak fotoğraf, URI, dosya yolu ve base64 içermez.
     const response = await accountAuthenticatedFetch(baseUrl, '/api/outfits', {
@@ -147,6 +165,12 @@ export async function requestOutfits(
           accessory: extras?.accessory ?? 'auto',
           outerwear: extras?.outerwear ?? 'auto',
         },
+        context: context ?? null,
+        avoid: avoid.slice(0, 200),
+        anchorId: options.anchorId ?? null,
+        note: options.note?.trim().slice(0, 300) || null,
+        disliked: (options.disliked ?? []).slice(0, 100),
+        shopCategories: (options.shopCategories ?? []).slice(0, 3),
       }),
     }, controller.signal, language);
     if (!response.ok) throw new Error(await readError(response, language));
@@ -154,19 +178,23 @@ export async function requestOutfits(
       suggestions: OutfitSuggestion[];
       usedFallback?: boolean;
       warning?: string;
+      shopping?: ShoppingLook | null;
     };
     return {
       suggestions: body.suggestions,
       usedFallback: body.usedFallback ?? false,
       warning: body.warning,
+      shopping: body.shopping ?? null,
     };
   } catch (error) {
+    if (options.signal?.aborted) throw error;
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(language === 'tr' ? 'Kombin isteği zaman aşımına uğradı.' : 'The outfit request timed out.');
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 

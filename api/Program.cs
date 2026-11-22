@@ -34,7 +34,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNameCaseInsensitive = true;
 });
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 15 * 1024 * 1024);
-builder.Services.AddHttpClient<OpenAiWardrobeService>(client => client.Timeout = TimeSpan.FromSeconds(60));
+// Reasoning models used for outfits can take noticeably longer than the vision analysis call.
+builder.Services.AddHttpClient<OpenAiWardrobeService>(client => client.Timeout = TimeSpan.FromSeconds(120));
+// Product page previews: redirects are followed manually so every hop is checked for a public host.
+builder.Services.AddHttpClient<ProductPreviewService>(client => client.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
 builder.Services.AddHttpClient<GoogleOAuthService>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<EmailOtpSender>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<BackgroundRemovalService>(client => client.Timeout = TimeSpan.FromSeconds(45));
@@ -552,6 +560,7 @@ app.MapPost("/api/outfits", async (
     OutfitRequest request,
     HttpContext context,
     OpenAiWardrobeService ai,
+    ProductPreviewService previews,
     PersistentUsageQuotaService quota,
     CancellationToken cancellationToken) =>
 {
@@ -564,57 +573,133 @@ app.MapPost("/api/outfits", async (
     if (request.Wardrobe.GroupBy(x => x.Id).Any(group => group.Count() > 1))
         return Results.BadRequest(new { message = "Kıyafet ID'leri benzersiz olmalı." });
 
-    var missing = OutfitRules.MissingCategories(request.Wardrobe);
+    // An anchor that is not in the (possibly weather-filtered) wardrobe is simply ignored.
+    if (OutfitRules.Anchor(request) is null) request.AnchorId = null;
+    var shopCategories = OutfitRules.ShopCategories(request);
+
+    // A main category may be missing from the wardrobe when it is being bought (shopping look).
+    var missing = OutfitRules.MissingCategories(request.Wardrobe).Where(x => !shopCategories.Contains(x)).ToList();
     if (missing.Count > 0)
         return Results.BadRequest(new { code = "missing_category", missingCategories = missing, message = "Kombin için her ana kategoriden en az bir parça gerekli." });
 
+    var english = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase);
     var usageSubjects = UsageSubjects(context);
     var tier = UserTier(context);
-    var quotaDecision = await quota.TryConsumeAsync(
-        usageSubjects.Primary,
-        usageSubjects.Secondary,
-        AiOperation.Outfit,
-        tier,
-        cancellationToken);
-    if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
-
-    var target = Math.Min(3, OutfitRules.PossibleCount(request.Wardrobe));
-    var english = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase);
-    var collected = new List<OutfitSuggestion>();
+    var target = Math.Min(3, OutfitRules.PossibleCount(request));
+    var wardrobeOutfits = target > 0;
     string? warning = null;
-    var aiResponded = false;
 
-    for (var attempt = 0; attempt < ai.MaxAttempts && OutfitRules.ValidateAi(request.Wardrobe, collected).Count < target; attempt++)
+    // Credits: 1 for the wardrobe outfits + 1 per shopping category (each one is its own web search).
+    if (wardrobeOutfits)
     {
+        var quotaDecision = await quota.TryConsumeAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, tier, cancellationToken);
+        if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
+    }
+    var shoppingCharged = 0;
+    QuotaDecision? lastShoppingDecision = null;
+    foreach (var _ in shopCategories)
+    {
+        lastShoppingDecision = await quota.TryConsumeAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, tier, cancellationToken);
+        if (lastShoppingDecision.Status != QuotaStatus.Allowed) break;
+        shoppingCharged++;
+    }
+    if (shoppingCharged < shopCategories.Count)
+    {
+        for (var i = 0; i < shoppingCharged; i++)
+            await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
+        shoppingCharged = 0;
+        if (!wardrobeOutfits && lastShoppingDecision is not null && QuotaError(lastShoppingDecision) is { } shoppingQuotaError)
+            return shoppingQuotaError;
+        warning = english
+            ? "Not enough AI credits for the shopping suggestion (1 per category), so only wardrobe outfits were created."
+            : "Alışveriş önerisi için yeterli AI kredin kalmadı (kategori başına 1 🪙); yalnızca dolap kombinleri hazırlandı.";
+        shopCategories = [];
+    }
+
+    // Shopping look runs in parallel with the wardrobe suggestions; its failure never blocks them.
+    var shoppingTask = shopCategories.Count == 0
+        ? Task.FromResult<(ShoppingLook? Look, bool Failed)>((null, false))
+        : RunShoppingAsync(ai, previews, request, shopCategories, app.Logger, cancellationToken);
+
+    var collected = new List<OutfitSuggestion>();
+    var aiResponded = false;
+    var aiFailed = false;
+
+    var aiStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    for (var attempt = 0; wardrobeOutfits && attempt < ai.MaxAttempts && OutfitRules.ValidateAi(request.Wardrobe, collected).Count < target; attempt++)
+    {
+        // Reasoning models are slow; a second round after a long first one would outlast the
+        // app's request timeout, so local rules complete the set instead.
+        if (attempt > 0 && aiStopwatch.Elapsed > TimeSpan.FromSeconds(45)) break;
         try
         {
-            collected.AddRange(await ai.SuggestAsync(request, cancellationToken));
+            // On a retry, tell the model what it already proposed so it does not repeat itself.
+            collected.AddRange(await ai.SuggestAsync(request, OutfitRules.ValidateAi(request.Wardrobe, collected), cancellationToken));
             aiResponded = true;
         }
         catch (AiServiceException error)
         {
             app.Logger.LogWarning(error, "Kombin AI denemesi {Attempt} başarısız", attempt + 1);
+            aiFailed = true;
             warning = english
                 ? "The smart suggestion service was unavailable, so local rules were used."
                 : "Akıllı öneri servisine ulaşılamadığı için yerel kurallar kullanıldı.";
             break;
         }
     }
-
-    if (!aiResponded && warning is not null)
+    if (wardrobeOutfits && aiFailed && !aiResponded)
         await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
 
     var validAi = OutfitRules.ValidateAi(request.Wardrobe, collected);
-    var completed = OutfitRules.Complete(request, validAi);
+    var completed = wardrobeOutfits ? OutfitRules.Complete(request, validAi) : [];
     var usedFallback = completed.Count > validAi.Take(target).Count();
     if (usedFallback && warning is null)
         warning = english
             ? "Missing or invalid smart suggestions were completed with local rules."
             : "Eksik veya geçersiz akıllı öneriler yerel kurallarla tamamlandı.";
-    return Results.Ok(new OutfitResponse(completed, usedFallback, warning));
+
+    var shopping = await shoppingTask;
+    if (shoppingCharged > 0 && shopping.Look is null)
+    {
+        // The shopping credits are returned when no shopping look could be delivered.
+        for (var i = 0; i < shoppingCharged; i++)
+            await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
+        var shoppingWarning = english
+            ? "Shopping suggestions could not be prepared right now; their credits were refunded."
+            : "Alışveriş önerisi şu anda hazırlanamadı; krediler iade edildi.";
+        warning = warning is null ? shoppingWarning : $"{warning} {shoppingWarning}";
+    }
+    return Results.Ok(new OutfitResponse(completed, usedFallback, warning, shopping.Look));
 }).RequireRateLimiting("ai");
 
 app.Run();
+
+static async Task<(ShoppingLook? Look, bool Failed)> RunShoppingAsync(
+    OpenAiWardrobeService ai,
+    ProductPreviewService previews,
+    OutfitRequest request,
+    IReadOnlyCollection<string> shopCategories,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        var look = await ai.ShopAsync(request, shopCategories, cancellationToken);
+        if (look is not null)
+            await previews.EnrichAsync(look.Pieces.SelectMany(x => x.Products).ToList(), cancellationToken);
+        return (look, look is null);
+    }
+    catch (AiServiceException error)
+    {
+        logger.LogWarning(error, "Alışveriş önerisi başarısız");
+        return (null, true);
+    }
+    catch (JsonException error)
+    {
+        logger.LogWarning(error, "Alışveriş önerisi okunamadı");
+        return (null, true);
+    }
+}
 
 static string InstallationId(HttpContext context) =>
     context.Items[InstallationTokenService.ContextItemKey]?.ToString()

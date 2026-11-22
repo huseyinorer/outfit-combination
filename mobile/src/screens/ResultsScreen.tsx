@@ -13,6 +13,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { ImageViewerModal } from '../components/ImageViewerModal';
+import { ShoppingLookView } from '../components/ShoppingLookView';
 import { OutfitPreview } from '../components/OutfitPreview';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Notice, ScreenHeader, SecondaryButton } from '../components/ui';
@@ -24,8 +25,8 @@ import type {
   OutfitSuggestion,
 } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
-import { getOutfitFeedback, markOutfitWorn, setOutfitFeedback } from '../data/database';
-import type { OutfitFeedbackValue } from '../domain/types';
+import { getOutfitDislikeReason, getOutfitFeedback, markOutfitWorn, setOutfitFeedback } from '../data/database';
+import type { OutfitDislikeReason, OutfitFeedbackValue, OutfitRequestExtras, ShoppingLook } from '../domain/types';
 import { useI18n } from '../locales';
 import { tactileSuccess } from '../services/feedback';
 import { hapticTick } from '../services/haptics';
@@ -36,6 +37,15 @@ interface Props {
   preferences: OutfitPreferences;
   favorites: FavoriteOutfit[];
   warning?: string;
+  initialIndex?: number;
+  /** Piece the user asked to build around; "show another set" keeps it. */
+  anchorId?: string | null;
+  /** Optional "complete with shopping" look shown on its own tab. */
+  shopping?: ShoppingLook | null;
+  initialTab?: 'wardrobe' | 'shopping';
+  /** Extras modes and usable pieces of the original request, so "show another set" matches it. */
+  extras?: OutfitRequestExtras;
+  poolIds?: string[] | null;
   onToggleFavorite: (suggestion: OutfitSuggestion) => Promise<void>;
   onBack: () => void;
 }
@@ -45,27 +55,51 @@ export function ResultsScreen(props: Props) {
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
   const [displayed, setDisplayed] = useState(props.suggestions);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const startIndex = Math.max(0, Math.min(props.initialIndex ?? 0, props.suggestions.length - 1));
+  const [activeIndex, setActiveIndex] = useState(startIndex);
+  const [tab, setTab] = useState<'wardrobe' | 'shopping'>(props.initialTab ?? (props.shopping ? 'shopping' : 'wardrobe'));
+  const pool = useMemo(() => {
+    if (!props.poolIds) return props.items;
+    const allowed = new Set(props.poolIds);
+    return props.items.filter((item) => allowed.has(item.id));
+  }, [props.items, props.poolIds]);
   const [viewerContext, setViewerContext] = useState<{ items: ClothingItem[]; initialIndex: number } | null>(null);
   const [seenKeys, setSeenKeys] = useState(() => new Set(props.suggestions.map(outfitKey)));
   const [pinned, setPinned] = useState<Partial<Record<'topId' | 'bottomId' | 'shoeId', string>>>({});
   const [feedback, setFeedback] = useState<Record<string, OutfitFeedbackValue | undefined>>({});
-  const scrollX = useRef(new Animated.Value(0)).current;
+  const [dislikeReasons, setDislikeReasons] = useState<Record<string, OutfitDislikeReason | undefined>>({});
+  const reasonOptions: Array<{ value: OutfitDislikeReason; label: string }> = [
+    { value: 'colors', label: l('🎨 Renkler uymuyor', '🎨 Colors clash') },
+    { value: 'occasion', label: l('📍 Ortama uygun değil', '📍 Wrong for the occasion') },
+    { value: 'weather', label: l('🌦 Havaya uygun değil', '🌦 Wrong for the weather') },
+    { value: 'style', label: l('🙅 Tarzım değil', '🙅 Not my style') },
+  ];
+  const scrollX = useRef(new Animated.Value(startIndex * width)).current;
   const listRef = useRef<FlatList<OutfitSuggestion>>(null);
   const favoriteKeys = useMemo(() => new Set(props.favorites.map(outfitKey)), [props.favorites]);
 
   useEffect(() => {
     setDisplayed(props.suggestions);
     setSeenKeys(new Set(props.suggestions.map(outfitKey)));
-    setActiveIndex(0);
-  }, [props.suggestions]);
+    const index = Math.max(0, Math.min(props.initialIndex ?? 0, props.suggestions.length - 1));
+    setActiveIndex(index);
+    scrollX.setValue(index * width);
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: index * width, animated: false }));
+    // width is read once per suggestion set; rotating keeps the current page via onMomentumScrollEnd.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.suggestions, props.initialIndex]);
 
   useEffect(() => {
     let active = true;
-    void Promise.all(displayed.map(async (suggestion) => [outfitKey(suggestion), await getOutfitFeedback(suggestion)] as const))
+    void Promise.all(displayed.map(async (suggestion) => [
+      outfitKey(suggestion),
+      await getOutfitFeedback(suggestion),
+      await getOutfitDislikeReason(suggestion),
+    ] as const))
       .then((values) => {
         if (!active) return;
-        setFeedback(Object.fromEntries(values.filter(([, value]) => value !== null)) as Record<string, OutfitFeedbackValue>);
+        setFeedback(Object.fromEntries(values.filter(([, value]) => value !== null).map(([key, value]) => [key, value])) as Record<string, OutfitFeedbackValue>);
+        setDislikeReasons(Object.fromEntries(values.filter(([, , reason]) => reason !== null).map(([key, , reason]) => [key, reason])) as Record<string, OutfitDislikeReason>);
       });
     return () => { active = false; };
   }, [displayed]);
@@ -73,10 +107,12 @@ export function ResultsScreen(props: Props) {
   const showAnotherSet = () => {
     const matchesPins = (suggestion: OutfitSuggestion) => Object.entries(pinned)
       .every(([field, id]) => !id || suggestion[field as 'topId' | 'bottomId' | 'shoeId'] === id);
-    let next = buildLocalSuggestions(props.items, props.preferences, seenKeys).filter(matchesPins).slice(0, 3);
+    const anchorId = props.anchorId ?? null;
+    const extras = props.extras ?? {};
+    let next = buildLocalSuggestions(pool, props.preferences, seenKeys, extras, anchorId).filter(matchesPins).slice(0, 3);
     let nextSeen = new Set(seenKeys);
     if (next.length === 0) {
-      next = buildLocalSuggestions(props.items, props.preferences).filter(matchesPins).slice(0, 3);
+      next = buildLocalSuggestions(pool, props.preferences, new Set(), extras, anchorId).filter(matchesPins).slice(0, 3);
       nextSeen = new Set<string>();
     }
     if (next.length === 0) return;
@@ -147,7 +183,15 @@ export function ResultsScreen(props: Props) {
   const saveFeedback = async (suggestion: OutfitSuggestion, value: OutfitFeedbackValue) => {
     await setOutfitFeedback(suggestion, value);
     setFeedback((current) => ({ ...current, [outfitKey(suggestion)]: value }));
+    setDislikeReasons((current) => ({ ...current, [outfitKey(suggestion)]: undefined }));
     tactileSuccess(value === 'like' ? t('result.like') : t('result.dislike'));
+  };
+
+  const saveDislikeReason = async (suggestion: OutfitSuggestion, reason: OutfitDislikeReason) => {
+    hapticTick('select');
+    await setOutfitFeedback(suggestion, 'dislike', reason);
+    setDislikeReasons((current) => ({ ...current, [outfitKey(suggestion)]: reason }));
+    tactileSuccess(l('Teşekkürler, sonraki önerilerde dikkate alınacak.', 'Thanks, future suggestions will take this into account.'));
   };
 
   const saveWorn = async (suggestion: OutfitSuggestion) => {
@@ -252,6 +296,26 @@ export function ResultsScreen(props: Props) {
                 <Text style={styles.feedbackText}>✓ {t('result.woreToday')}</Text>
               </Pressable>
             </View>
+            {currentFeedback === 'dislike' ? (
+              <View style={styles.reasonBox}>
+                <Text style={styles.reasonTitle}>
+                  {dislikeReasons[outfitKey(item)]
+                    ? l('Sebebi kaydedildi. İstersen değiştirebilirsin:', 'Reason saved. You can change it:')
+                    : l('Neden beğenmedin? (isteğe bağlı)', 'Why not? (optional)')}
+                </Text>
+                <View style={styles.feedbackRow}>
+                  {reasonOptions.map((option) => (
+                    <Pressable
+                      key={option.value}
+                      onPress={() => void saveDislikeReason(item, option.value)}
+                      style={[styles.feedbackButton, dislikeReasons[outfitKey(item)] === option.value && styles.feedbackButtonActive]}
+                    >
+                      <Text style={styles.feedbackText}>{option.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
             <View style={styles.idBox}>
               {pieceRow(t('result.top', { name: resolved.top.name || resolved.top.subType || t('category.top') }), resolved.top, 'topId', 'top')}
               {pieceRow(t('result.bottom', { name: resolved.bottom.name || resolved.bottom.subType || t('category.bottom') }), resolved.bottom, 'bottomId', 'bottom')}
@@ -270,7 +334,32 @@ export function ResultsScreen(props: Props) {
       {props.warning ? (
         <ContentFrame maxWidth={820} style={styles.noticeWrap}><Notice>{props.warning}</Notice></ContentFrame>
       ) : null}
-      {displayed.length > 0 ? (
+      {props.shopping && displayed.length > 0 ? (
+        <View style={styles.tabs}>
+          {(['wardrobe', 'shopping'] as const).map((value) => (
+            <Pressable
+              key={value}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === value }}
+              onPress={() => setTab(value)}
+              style={[styles.tab, tab === value && styles.tabActive]}
+            >
+              <Text style={[styles.tabText, tab === value && styles.tabTextActive]}>
+                {value === 'wardrobe'
+                  ? l(`👕 Dolabımdan (${displayed.length})`, `👕 From my wardrobe (${displayed.length})`)
+                  : l('🛍 Alışverişle', '🛍 With shopping')}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {props.shopping && (tab === 'shopping' || displayed.length === 0) ? (
+        <ScrollView contentContainerStyle={styles.shoppingContent}>
+          <ContentFrame maxWidth={820}>
+            <ShoppingLookView look={props.shopping} items={props.items} />
+          </ContentFrame>
+        </ScrollView>
+      ) : displayed.length > 0 ? (
         <>
           <Animated.FlatList
             ref={listRef}
@@ -278,6 +367,8 @@ export function ResultsScreen(props: Props) {
             extraData={{ favorites: props.favorites, feedback, pinned }}
             keyExtractor={outfitKey}
             renderItem={renderItem}
+            initialScrollIndex={startIndex}
+            getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
@@ -339,6 +430,8 @@ const styles = StyleSheet.create({
   feedbackButton: { minHeight: 38, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: spacing.sm, backgroundColor: colors.background },
   feedbackButtonActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   feedbackText: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  reasonBox: { gap: spacing.xs, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.background },
+  reasonTitle: { color: colors.muted, fontSize: 12, fontWeight: '700' },
   idBox: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.sm, gap: spacing.sm },
   pieceRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
   idText: { flex: 1, minWidth: 120, color: colors.muted, fontSize: 12 },
@@ -352,5 +445,11 @@ const styles = StyleSheet.create({
   swipe: { color: colors.muted, fontSize: 12, textAlign: 'center', paddingBottom: spacing.sm },
   footerButton: { flex: 1 },
   emptyWrap: { padding: spacing.md },
+  tabs: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+  tab: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  tabTextActive: { color: colors.onPrimary },
+  shoppingContent: { padding: spacing.md, paddingBottom: 48 },
   pressed: { opacity: 0.7 },
 });

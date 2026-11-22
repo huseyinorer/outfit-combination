@@ -9,9 +9,10 @@ import { Chip, Notice, PrimaryButton, SecondaryButton } from '../components/ui';
 import type { AccountState } from '../services/accountAuth';
 import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
-import { countWornByClothing } from '../data/database';
+import { countWornByClothing, getSetting, setSetting } from '../data/database';
+import { isIncomplete } from '../domain/completeness';
 
-type Filter = 'all' | Category | 'recent' | 'summer' | 'winter';
+type Filter = 'all' | Category | 'recent' | 'summer' | 'winter' | 'incomplete';
 
 interface Props {
   items: ClothingItem[];
@@ -20,6 +21,7 @@ interface Props {
   onAdd: (category?: Category) => void;
   onRecommend: () => void;
   onOpen: (item: ClothingItem) => void;
+  onOutfitWith: (item: ClothingItem) => void;
   onDelete: (item: ClothingItem) => Promise<void>;
   onResumeDraft: () => void;
   onCancelDraft: () => Promise<void>;
@@ -30,6 +32,8 @@ interface Props {
   onStats: () => void;
   onCalendar: () => void;
   onPacking: () => void;
+  onAnalyzeIncomplete: (items: ClothingItem[], onProgress: (done: number, total: number) => void) => Promise<void>;
+  analysisRemaining?: number;
   favoriteCount: number;
   account: AccountState;
   onRefresh?: () => Promise<void>;
@@ -46,6 +50,28 @@ export function HomeScreen(props: Props) {
   const [accountBusy, setAccountBusy] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
   const [wearCounts, setWearCounts] = React.useState<Map<string, number>>(new Map());
+  const [analysisProgress, setAnalysisProgress] = React.useState<{ done: number; total: number } | null>(null);
+  const incompleteItems = React.useMemo(() => props.items.filter(isIncomplete), [props.items]);
+  const incompleteIds = React.useMemo(() => new Set(incompleteItems.map((item) => item.id)), [incompleteItems]);
+  // "Hide for now" remembers how many incomplete items there were; the banner returns only when
+  // that number grows (e.g. a new item was saved without details).
+  const [bannerHiddenAt, setBannerHiddenAt] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    void getSetting('incomplete_banner_hidden_count').then((value) => {
+      const parsed = value ? Number(value) : NaN;
+      setBannerHiddenAt(Number.isFinite(parsed) ? parsed : null);
+    });
+  }, []);
+  const showIncompleteBanner = incompleteItems.length > 0
+    && (bannerHiddenAt === null || incompleteItems.length > bannerHiddenAt);
+  const hideIncompleteBanner = () => {
+    setBannerHiddenAt(incompleteItems.length);
+    void setSetting('incomplete_banner_hidden_count', String(incompleteItems.length));
+  };
+
+  React.useEffect(() => {
+    if (filter === 'incomplete' && incompleteItems.length === 0) setFilter('all');
+  }, [filter, incompleteItems.length]);
 
   React.useEffect(() => {
     void (async () => setWearCounts(await countWornByClothing()))();
@@ -61,6 +87,7 @@ export function HomeScreen(props: Props) {
       || (filter === 'recent' && Date.now() - Date.parse(item.createdAt) <= 30 * 24 * 60 * 60 * 1_000)
       || (filter === 'summer' && item.seasons.some((season) => /yaz|summer/i.test(season)))
       || (filter === 'winter' && item.seasons.some((season) => /kış|kis|winter/i.test(season)))
+      || (filter === 'incomplete' && incompleteIds.has(item.id))
       || item.category === filter;
     if (!filterMatches) return false;
     if (!normalizedSearch) return true;
@@ -110,6 +137,42 @@ export function HomeScreen(props: Props) {
     void props.onDelete(item).catch((error: unknown) => {
       Alert.alert(l('Silinemedi', 'Could not delete'), error instanceof Error ? error.message : t('common.unknownError'));
     });
+  };
+
+  const analyzeIncomplete = () => {
+    if (analysisProgress) return;
+    const count = props.analysisRemaining === undefined
+      ? incompleteItems.length
+      : Math.min(incompleteItems.length, props.analysisRemaining);
+    Alert.alert(
+      l('Eksikleri AI ile tamamla', 'Complete with AI'),
+      count < incompleteItems.length
+        ? l(
+          `Kredin ${count} parçaya yetiyor; ${count} analiz kredisi kullanılacak. Kalanları elle doldurabilirsin. Girdiğin bilgiler değişmez, yalnızca boş alanlar doldurulur.`,
+          `Your credits cover ${count} items; ${count} analysis credits will be used. Fill the rest manually. Your existing details stay; only empty fields are filled.`,
+        )
+        : l(
+          `${count} parça fotoğrafından analiz edilecek ve ${count} analiz kredisi kullanılacak. Girdiğin bilgiler değişmez, yalnızca boş alanlar doldurulur.`,
+          `${count} items will be analyzed from their photos, using ${count} analysis credits. Your existing details stay; only empty fields are filled.`,
+        ),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: l('Analiz et', 'Analyze'),
+          onPress: () => {
+            setAnalysisProgress({ done: 0, total: count });
+            void props.onAnalyzeIncomplete(incompleteItems, (done, total) => setAnalysisProgress({ done, total }))
+              .finally(() => setAnalysisProgress(null));
+          },
+        },
+      ],
+    );
+  };
+
+  const fillManually = () => {
+    const [first] = incompleteItems;
+    if (incompleteItems.length === 1 && first) props.onOpen(first);
+    else setFilter('incomplete');
   };
 
   const cancelPendingDraft = () => {
@@ -234,6 +297,41 @@ export function HomeScreen(props: Props) {
         </Pressable>
       </View>
 
+      {showIncompleteBanner ? (
+        <View accessibilityRole="alert" style={styles.incompleteCard}>
+          <Text style={styles.incompleteTitle}>
+            {l(`⚠ ${incompleteItems.length} parçada eksik bilgi var`, `⚠ ${incompleteItems.length} items are missing details`)}
+          </Text>
+          <Text style={styles.incompleteText}>
+            {l(
+              'Kalıp, kumaş, resmiyet veya mevsim gibi bilgiler eksik olduğunda kombin önerileri zayıflar. Eksikleri AI ile tamamlat ya da kendin doldur.',
+              'Outfit suggestions get weaker when fit, fabric, formality or season is missing. Let AI complete them or fill them in yourself.',
+            )}
+          </Text>
+          <View style={styles.incompleteActions}>
+            <PrimaryButton
+              title={analysisProgress
+                ? l(`Analiz ediliyor ${analysisProgress.done}/${analysisProgress.total}`, `Analyzing ${analysisProgress.done}/${analysisProgress.total}`)
+                : l('✦ AI ile analiz et', '✦ Analyze with AI')}
+              onPress={analyzeIncomplete}
+              loading={Boolean(analysisProgress)}
+              style={styles.incompleteButton}
+            />
+            <SecondaryButton
+              title={l('Elle doldur', 'Fill in manually')}
+              onPress={fillManually}
+              disabled={Boolean(analysisProgress)}
+              style={styles.incompleteButton}
+            />
+          </View>
+          <Pressable accessibilityRole="button" onPress={hideIncompleteBanner} hitSlop={6} disabled={Boolean(analysisProgress)}>
+            <Text style={styles.incompleteHide}>
+              {l('Şimdilik gizle (eksik parçalar "⚠ Eksik bilgili" filtresinde kalır)', 'Hide for now (incomplete items stay under the "⚠ Missing details" filter)')}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{t('home.wardrobe')}</Text>
         <View style={styles.sectionMeta}>
@@ -276,6 +374,13 @@ export function HomeScreen(props: Props) {
         <Chip label={l('Yeni eklenenler', 'Recently added')} selected={filter === 'recent'} onPress={() => setFilter('recent')} />
         <Chip label={l('Yaz', 'Summer')} selected={filter === 'summer'} onPress={() => setFilter('summer')} />
         <Chip label={l('Kış', 'Winter')} selected={filter === 'winter'} onPress={() => setFilter('winter')} />
+        {incompleteItems.length > 0 ? (
+          <Chip
+            label={l(`⚠ Eksik bilgili (${incompleteItems.length})`, `⚠ Missing details (${incompleteItems.length})`)}
+            selected={filter === 'incomplete'}
+            onPress={() => setFilter('incomplete')}
+          />
+        ) : null}
       </View>
     </View>
   );
@@ -294,6 +399,7 @@ export function HomeScreen(props: Props) {
             item={item}
             width={cardWidth}
             wears={wearCounts.get(item.id) ?? 0}
+            incomplete={incompleteIds.has(item.id)}
             onPress={() => props.onOpen(item)}
             onMenu={() => setMenuItem(item)}
           />
@@ -333,6 +439,7 @@ export function HomeScreen(props: Props) {
         item={menuItem}
         onClose={() => setMenuItem(null)}
         onEdit={props.onOpen}
+        onOutfitWith={props.onOutfitWith}
         onDelete={deleteFromMenu}
       />
     </View>
@@ -441,6 +548,19 @@ const styles = StyleSheet.create({
   readinessCount: { color: colors.text, fontSize: 14, fontWeight: '800' },
   readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   toolsRow: { flexDirection: 'row', gap: spacing.sm },
+  incompleteCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningSoft,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  incompleteTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  incompleteText: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  incompleteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  incompleteButton: { flexGrow: 1, flexBasis: 140 },
+  incompleteHide: { color: colors.muted, fontSize: 12, fontWeight: '700', textDecorationLine: 'underline' },
   toolTile: {
     flex: 1,
     minHeight: 68,

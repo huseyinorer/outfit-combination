@@ -179,3 +179,18 @@ test('resolveOutfitItems opsiyonel slotları da döndürür', () => {
   assert.equal(resolved.outerwear?.id, 'o1');
 });
 
+
+test('sabit parça her yerel ve AI önerisinde yer alır', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('t2', 'top'), item('t3', 'top'),
+    item('b1', 'bottom'), item('b2', 'bottom'),
+    item('s1', 'shoes'), item('h1', 'hat'),
+  ];
+  const local = completeSuggestions(wardrobe, preferences, [], new Set(), {}, 'b2');
+  assert.equal(local.length, 3);
+  assert.ok(local.every((suggestion) => suggestion.bottomId === 'b2'));
+
+  const ai = [{ title: 'x', topId: 't1', bottomId: 'b1', shoeId: 's1', reason: 'y' }];
+  const withHat = completeSuggestions(wardrobe, preferences, ai, new Set(), { hat: 'exclude' }, 'h1');
+  assert.ok(withHat.every((suggestion) => suggestion.hatId === 'h1'));
+});

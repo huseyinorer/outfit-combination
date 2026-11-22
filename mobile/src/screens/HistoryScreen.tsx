@@ -3,12 +3,14 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { ContentFrame } from '../components/layout';
 import { OutfitPreview } from '../components/OutfitPreview';
 import { Notice, ScreenHeader } from '../components/ui';
-import { listSuggestionHistory, listWornOutfits } from '../data/database';
+import { listShoppingHistory, listSuggestionHistory, listWornOutfits } from '../data/database';
 import { resolveOutfitItems } from '../domain/outfitEngine';
 import type {
   ClothingItem,
   OutfitPreferences,
   OutfitSuggestion,
+  ShoppingHistoryEntry,
+  ShoppingLook,
   SuggestedOutfitHistoryEntry,
   WornOutfit,
 } from '../domain/types';
@@ -18,7 +20,13 @@ import { colors, radius, spacing } from '../theme/theme';
 interface Props {
   items: ClothingItem[];
   onBack: () => void;
-  onOpenSuggestions: (suggestions: OutfitSuggestion[], preferences: OutfitPreferences) => void;
+  onOpenSuggestions: (
+    suggestions: OutfitSuggestion[],
+    preferences: OutfitPreferences,
+    initialIndex?: number,
+    shopping?: ShoppingLook | null,
+    initialTab?: 'wardrobe' | 'shopping',
+  ) => void;
 }
 
 type Tab = 'suggested' | 'worn';
@@ -28,6 +36,7 @@ interface SuggestionBatch {
   suggestedAt: string;
   preferences: OutfitPreferences;
   entries: SuggestedOutfitHistoryEntry[];
+  shopping: ShoppingLook | null;
 }
 
 export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
@@ -36,15 +45,17 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
   const [tab, setTab] = useState<Tab>('suggested');
   const [suggested, setSuggested] = useState<SuggestedOutfitHistoryEntry[]>([]);
   const [worn, setWorn] = useState<WornOutfit[]>([]);
+  const [shoppingHistory, setShoppingHistory] = useState<ShoppingHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    void Promise.all([listSuggestionHistory(), listWornOutfits()])
-      .then(([nextSuggested, nextWorn]) => {
+    void Promise.all([listSuggestionHistory(), listWornOutfits(), listShoppingHistory().catch(() => [])])
+      .then(([nextSuggested, nextWorn, nextShopping]) => {
         if (!mounted) return;
         setSuggested(nextSuggested);
         setWorn(nextWorn);
+        setShoppingHistory(nextShopping);
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -64,10 +75,23 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
         suggestedAt: entry.suggestedAt,
         preferences: entry.preferences,
         entries: [entry],
+        shopping: null,
       });
     }
-    return [...grouped.values()];
-  }, [items, suggested]);
+    // Shopping looks join their batch, or form their own when there were no wardrobe outfits.
+    for (const shop of shoppingHistory) {
+      const existing = grouped.get(shop.batchId);
+      if (existing) existing.shopping = shop.look;
+      else grouped.set(shop.batchId, {
+        id: shop.batchId,
+        suggestedAt: shop.suggestedAt,
+        preferences: shop.preferences,
+        entries: [],
+        shopping: shop.look,
+      });
+    }
+    return [...grouped.values()].sort((a, b) => b.suggestedAt.localeCompare(a.suggestedAt));
+  }, [items, suggested, shoppingHistory]);
 
   const locale = language === 'tr' ? 'tr-TR' : 'en-US';
   const dateLabel = (value: string) => new Intl.DateTimeFormat(locale, {
@@ -97,11 +121,19 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
     preferences.tone,
   ].filter(Boolean).map(localizedPreference).join(' · ');
 
-  const suggestionThumbnail = (entry: SuggestedOutfitHistoryEntry) => {
+  // Each tile opens its own outfit; tapping elsewhere on the card still opens the first one.
+  const suggestionThumbnail = (batch: { entries: SuggestedOutfitHistoryEntry[]; preferences: OutfitPreferences; shopping: ShoppingLook | null }) =>
+    (entry: SuggestedOutfitHistoryEntry, index: number) => {
     const resolved = resolveOutfitItems(items, entry);
     if (!resolved.top || !resolved.bottom || !resolved.shoes) return null;
     return (
-      <View key={entry.id} style={styles.outfitTile}>
+      <Pressable
+        key={entry.id}
+        accessibilityRole="button"
+        accessibilityLabel={l(`${index + 1}. kombini aç: ${entry.title}`, `Open outfit ${index + 1}: ${entry.title}`)}
+        onPress={() => onOpenSuggestions(batch.entries, batch.preferences, index, batch.shopping, 'wardrobe')}
+        style={({ pressed }) => [styles.outfitTile, pressed && styles.pressed]}
+      >
         <View style={styles.photoRow}>
           {[resolved.top, resolved.bottom, resolved.shoes].map((piece) => (
             <Image
@@ -113,7 +145,7 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
           ))}
         </View>
         <Text numberOfLines={1} style={styles.outfitTitle}>{entry.title}</Text>
-      </View>
+      </Pressable>
     );
   };
 
@@ -151,13 +183,13 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
           ) : null}
 
           {tab === 'suggested' ? batches.map((batch) => {
-            const usedAi = batch.entries.some((entry) => entry.source === 'ai');
+            const usedAi = batch.entries.some((entry) => entry.source === 'ai') || Boolean(batch.shopping);
             return (
               <Pressable
                 key={batch.id}
                 accessibilityRole="button"
                 accessibilityLabel={l('Bu önerileri yeniden aç', 'Open these suggestions again')}
-                onPress={() => onOpenSuggestions(batch.entries, batch.preferences)}
+                onPress={() => onOpenSuggestions(batch.entries, batch.preferences, 0, batch.shopping, batch.shopping ? 'shopping' : 'wardrobe')}
                 style={({ pressed }) => [styles.card, pressed && styles.pressed]}
               >
                 <View style={styles.header}>
@@ -169,8 +201,33 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
                     <Text style={styles.sourceText}>{usedAi ? l('✦ AI destekli', '✦ AI-powered') : l('⚡ Hızlı', '⚡ Quick')}</Text>
                   </View>
                 </View>
-                <View style={styles.outfitGrid}>{batch.entries.map(suggestionThumbnail)}</View>
-                <Text style={styles.openHint}>{l(`${batch.entries.length} kombini yeniden görüntüle →`, `View ${batch.entries.length} outfits again →`)}</Text>
+                {batch.entries.length > 0 ? (
+                  <View style={styles.outfitGrid}>{batch.entries.map(suggestionThumbnail(batch))}</View>
+                ) : null}
+                {batch.shopping ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => onOpenSuggestions(batch.entries, batch.preferences, 0, batch.shopping, 'shopping')}
+                    style={({ pressed }) => [styles.shoppingStrip, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.shoppingStripTitle}>
+                      🛍 {batch.shopping.pieces.map((piece) => piece.idealItem.name).join(' · ')}
+                    </Text>
+                    <View style={styles.shoppingThumbs}>
+                      {batch.shopping.pieces.flatMap((piece) => piece.products)
+                        .filter((product) => product.imageUrl)
+                        .slice(0, 5)
+                        .map((product) => (
+                          <Image key={product.url} source={{ uri: product.imageUrl }} style={styles.shoppingThumb} resizeMode="cover" />
+                        ))}
+                    </View>
+                  </Pressable>
+                ) : null}
+                <Text style={styles.openHint}>
+                  {batch.entries.length > 0
+                    ? l(`${batch.entries.length} kombini yeniden görüntüle →`, `View ${batch.entries.length} outfits again →`)
+                    : l('Alışveriş önerisini yeniden görüntüle →', 'View the shopping suggestion again →')}
+                </Text>
               </Pressable>
             );
           }) : null}
@@ -207,6 +264,10 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
 }
 
 const styles = StyleSheet.create({
+  shoppingStrip: { gap: spacing.xs, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, padding: spacing.sm },
+  shoppingStripTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  shoppingThumbs: { flexDirection: 'row', gap: 6 },
+  shoppingThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.surfaceMuted },
   screen: { flex: 1, backgroundColor: colors.background },
   tabs: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.background },
   tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },

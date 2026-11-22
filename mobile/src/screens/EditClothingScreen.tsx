@@ -13,22 +13,25 @@ import {
 } from 'react-native';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
-import { DangerButton, Field, PrimaryButton, ScreenHeader } from '../components/ui';
-import type { ClothingItem } from '../domain/types';
+import { DangerButton, Field, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
+import { detailLabels, fillMissingAttributes, missingDetails } from '../domain/completeness';
+import type { ClothingAttributes, ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 import { countWornByClothing } from '../data/database';
 
-export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
+export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }: {
   item: ClothingItem;
   onSave: (item: ClothingItem) => Promise<void>;
   onDelete: (item: ClothingItem) => Promise<void>;
+  /** Analyzes the saved photo with AI; resolves null when the user did not allow AI. */
+  onAnalyze: (item: ClothingItem) => Promise<ClothingAttributes | null>;
   onBack: () => void;
 }) {
   const { language, t } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const { width } = useWindowDimensions();
-  const [attributes, setAttributes] = useState({
+  const [attributes, setAttributes] = useState<ClothingAttributes>({
     name: item.name,
     subType: item.subType,
     primaryColor: item.primaryColor,
@@ -37,12 +40,43 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
     styleTags: item.styleTags,
     seasons: item.seasons,
     description: item.description,
+    fit: item.fit ?? '',
+    fabric: item.fabric ?? '',
+    formality: item.formality ?? '',
   });
   const [busy, setBusy] = useState(false);
   const [priceText, setPriceText] = useState<string>(item.price != null ? String(item.price) : '');
   const [currency, setCurrency] = useState<string>(item.currency ?? (language === 'tr' ? 'TL' : 'USD'));
   const [wearCount, setWearCount] = useState<number>(0);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisNote, setAnalysisNote] = useState<string | null>(null);
+  const missing = missingDetails({ ...attributes, category: item.category });
   const wide = width >= 900;
+
+  const analyzeWithAi = async () => {
+    if (analyzing || busy) return;
+    setAnalyzing(true);
+    setAnalysisNote(null);
+    try {
+      // Pass the current edits so they can be saved if the user has to sign in first.
+      const analysis = await onAnalyze({
+        ...item,
+        ...attributes,
+        price: parsedPrice,
+        currency: parsedPrice != null ? currency.trim() || null : null,
+      });
+      if (!analysis) return;
+      setAttributes((current) => fillMissingAttributes(current, analysis));
+      setAnalysisNote(l(
+        'Boş alanlar AI ile dolduruldu. Kontrol edip "Değişiklikleri kaydet"e dokun.',
+        'Empty fields were filled by AI. Review them and tap "Save changes".',
+      ));
+    } catch (error) {
+      Alert.alert(l('Analiz edilemedi', 'Could not analyze'), error instanceof Error ? error.message : t('common.unknownError'));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -126,6 +160,24 @@ export function EditClothingScreen({ item, onSave, onDelete, onBack }: {
             <Text style={styles.photoNote}>{l('Kombinlerde bu kayıtla eşleşen gerçek fotoğraf kullanılır.', 'Outfits use the real photo linked to this record.')}</Text>
           </View>
           <View style={styles.formColumn}>
+            {missing.length > 0 ? (
+              <View accessibilityRole="alert" style={styles.missingCard}>
+                <Text style={styles.missingTitle}>{l('⚠ Eksik bilgi var', '⚠ Missing details')}</Text>
+                <Text style={styles.missingText}>
+                  {l(
+                    `Eksik: ${detailLabels(missing, 'tr')}. Bu bilgiler kombin önerilerini iyileştirir. AI ile tamamlatabilir ya da aşağıdaki alanları kendin doldurabilirsin.`,
+                    `Missing: ${detailLabels(missing, 'en')}. These improve outfit suggestions. Let AI complete them or fill in the fields below yourself.`,
+                  )}
+                </Text>
+                <SecondaryButton
+                  title={analyzing ? l('Analiz ediliyor…', 'Analyzing…') : l('✦ AI ile analiz et', '✦ Analyze with AI')}
+                  onPress={() => void analyzeWithAi()}
+                  loading={analyzing}
+                  disabled={busy}
+                />
+              </View>
+            ) : null}
+            {analysisNote ? <Text style={styles.analysisNote}>{analysisNote}</Text> : null}
             <ClothingForm value={attributes} onChange={setAttributes} />
             <View style={styles.priceSection}>
               <Text style={styles.priceHeading}>{l('Fiyat ve giyim başı maliyet', 'Price and cost-per-wear')}</Text>
@@ -195,6 +247,18 @@ const styles = StyleSheet.create({
   footerSave: { flex: 1 },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.7 },
+  missingCard: {
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningSoft,
+    gap: spacing.sm,
+  },
+  missingTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  missingText: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  analysisNote: { color: colors.primary, fontSize: 13, fontWeight: '700', marginBottom: spacing.md },
   priceSection: {
     marginTop: spacing.md,
     padding: spacing.md,

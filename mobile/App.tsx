@@ -34,6 +34,7 @@ import {
   savePendingDraft,
   savePendingQueue,
   saveFavoriteOutfit,
+  saveShoppingHistory,
   saveSuggestionHistory,
   setSetting,
   softDeleteClothing,
@@ -41,15 +42,21 @@ import {
   updateClothing,
 } from './src/data/database';
 import { outfitKey } from './src/domain/outfitEngine';
+import { fillMissingAttributes } from './src/domain/completeness';
+import { analyzeClothing } from './src/services/api';
 import { normalizeApiBaseUrl } from './src/domain/apiUrl';
 import { AI_CONSENT_VERSION, AI_DISCLOSURE } from './src/domain/privacy';
 import type {
   Category,
+  ClothingAttributes,
   ClothingDraft,
   ClothingItem,
   FavoriteOutfit,
   OutfitPreferences,
+  OutfitRequestExtras,
+  OutfitResultsPayload,
   OutfitSuggestion,
+  ShoppingLook,
 } from './src/domain/types';
 import { evaluateVersion, type MobileVersionInfo, type VersionDecision } from './src/domain/version';
 import { tactileSuccess } from './src/services/feedback';
@@ -102,8 +109,8 @@ type Screen =
   | { name: 'home' }
   | { name: 'add'; category?: Category; resume?: boolean }
   | { name: 'edit'; item: ClothingItem }
-  | { name: 'recommend' }
-  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history' }
+  | { name: 'recommend'; anchorId?: string | null }
+  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history'; initialIndex?: number; anchorId?: string | null; shopping?: ShoppingLook | null; initialTab?: 'wardrobe' | 'shopping'; extras?: OutfitRequestExtras; poolIds?: string[] | null }
   | { name: 'favorites' }
   | { name: 'history' }
   | { name: 'stats' }
@@ -224,7 +231,7 @@ export default function App() {
   const goBack = useCallback(() => {
     if (screen.name === 'results') {
       if (screen.returnTo === 'history') setScreen({ name: 'history' });
-      else setScreen({ name: 'recommend' });
+      else setScreen({ name: 'recommend', anchorId: screen.anchorId ?? null });
       return;
     }
     if (screen.name === 'privacy') {
@@ -484,17 +491,15 @@ export default function App() {
     }
   };
 
-  const showNewResults = async (
-    suggestions: OutfitSuggestion[],
-    warning: string | undefined,
-    preferences: OutfitPreferences,
-  ) => {
+  const showNewResults = async (payload: OutfitResultsPayload) => {
+    const { suggestions, warning, preferences, anchorId = null, shopping = null, extras, poolIds = null } = payload;
     try {
-      await saveSuggestionHistory(suggestions, preferences);
+      const batchId = await saveSuggestionHistory(suggestions, preferences);
+      if (shopping) await saveShoppingHistory(batchId, shopping, preferences);
     } catch {
       // Geçmiş kaydı başarısız olsa bile oluşturulan kombinler kullanıcıya gösterilir.
     }
-    setScreen({ name: 'results', suggestions, warning, preferences, returnTo: 'recommend' });
+    setScreen({ name: 'results', suggestions, warning, preferences, returnTo: 'recommend', anchorId, shopping, extras, poolIds });
   };
 
   const saveApiUrl = async (nextApiUrl: string) => {
@@ -564,6 +569,111 @@ export default function App() {
     } catch (error) {
       Alert.alert(t('settings.signIn'), error instanceof Error ? error.message : t('common.unknownError'));
       return false;
+    }
+  };
+
+  const analysisRemaining = account.user && account.usage
+    ? Math.max(0, Math.min(
+      account.usage.dailyAnalysisLimit - account.usage.dailyAnalysisUsed,
+      account.usage.monthlyAnalysisLimit - account.usage.monthlyAnalysisUsed,
+    ))
+    : undefined;
+
+  const analyzeItemPhoto = async (item: ClothingItem): Promise<ClothingAttributes> => {
+    const result = await analyzeClothing(apiUrl, item.category, item.photoUri, language);
+    return {
+      name: result.name ?? '',
+      subType: result.subType ?? '',
+      primaryColor: result.primaryColor ?? '',
+      secondaryColors: result.secondaryColors ?? [],
+      pattern: result.pattern ?? '',
+      styleTags: result.styleTags ?? [],
+      seasons: result.seasons ?? [],
+      description: result.description ?? '',
+      fit: result.fit ?? '',
+      fabric: result.fabric ?? '',
+      formality: result.formality ?? '',
+    };
+  };
+
+  /** Edit screen: analyze one saved item's photo; the screen merges the result into its form. */
+  const analyzeSingleItem = async (item: ClothingItem): Promise<ClothingAttributes | null> => {
+    if (account.enabled && !account.user) {
+      // Signing in leaves the edit screen; offer to save the current edits first so nothing is lost.
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          l('Giriş yapman gerekiyor', 'Sign-in required'),
+          l(
+            'AI analizi için giriş yapmalısın. Yaptığın değişiklikleri kaydedip giriş ekranına geçelim mi?',
+            'AI analysis needs you to sign in. Save your changes and go to sign-in?',
+          ),
+          [
+            { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: l('Kaydet ve giriş yap', 'Save and sign in'), onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      });
+      if (!proceed) return null;
+      await updateClothing({ ...item, updatedAt: new Date().toISOString() });
+      await refresh();
+      setScreen({ name: 'auth', returnTo: 'home' });
+      return null;
+    }
+    if (!await requestAiAccess()) return null;
+    try {
+      return await analyzeItemPhoto(item);
+    } finally {
+      void refreshAccount();
+    }
+  };
+
+  /**
+   * Wardrobe banner: analyze incomplete items one by one and fill only their empty fields.
+   * Each item is saved as soon as it is done, so a failure part-way keeps earlier progress.
+   */
+  const analyzeIncompleteItems = async (
+    targets: ClothingItem[],
+    onProgress: (done: number, total: number) => void,
+  ): Promise<void> => {
+    if (targets.length === 0) return;
+    if (!await requestAiAccess()) return;
+    const limit = analysisRemaining ?? targets.length;
+    if (limit <= 0) {
+      Alert.alert(
+        l('AI analiz kredin bitti', 'No AI analysis credits left'),
+        l('Eksik bilgileri parçaya dokunup elle doldurabilirsin.', 'You can fill in the missing details by tapping an item.'),
+      );
+      return;
+    }
+    const batch = targets.slice(0, limit);
+    let updated = 0;
+    let failure: string | null = null;
+    onProgress(0, batch.length);
+    for (const item of batch) {
+      try {
+        const analysis = await analyzeItemPhoto(item);
+        const merged = fillMissingAttributes(item, analysis);
+        await updateClothing({ ...item, ...merged, updatedAt: new Date().toISOString() });
+        updated += 1;
+        onProgress(updated, batch.length);
+      } catch (error) {
+        failure = error instanceof Error ? error.message : t('common.unknownError');
+        break;
+      }
+    }
+    await refresh();
+    void refreshAccount();
+    const skipped = targets.length - batch.length;
+    if (failure) {
+      Alert.alert(
+        l('Analiz yarıda kaldı', 'Analysis stopped'),
+        l(`${updated} parça güncellendi. ${failure}`, `${updated} items updated. ${failure}`),
+      );
+    } else {
+      tactileSuccess(skipped > 0
+        ? l(`${updated} parça güncellendi. Kredin ${skipped} parça için yetmedi; onları elle doldurabilirsin.`, `${updated} items updated. Not enough credits for ${skipped}; fill those in manually.`)
+        : l(`${updated} parçanın eksik bilgileri dolduruldu.`, `Filled in missing details for ${updated} items.`));
     }
   };
 
@@ -724,12 +834,7 @@ export default function App() {
           onComplete={() => setScreen({ name: 'home' })}
           onRequestAiAccess={requestAiAccess}
           onAiUsageChanged={() => void refreshAccount()}
-          analysisRemaining={account.user && account.usage
-            ? Math.max(0, Math.min(
-              account.usage.dailyAnalysisLimit - account.usage.dailyAnalysisUsed,
-              account.usage.monthlyAnalysisLimit - account.usage.monthlyAnalysisUsed,
-            ))
-            : undefined}
+          analysisRemaining={analysisRemaining}
           onBack={goBack}
         />
       );
@@ -740,6 +845,7 @@ export default function App() {
           item={screen.item}
           onSave={saveEditedItem}
           onDelete={deleteItem}
+          onAnalyze={analyzeSingleItem}
           onBack={goBack}
         />
       );
@@ -747,8 +853,10 @@ export default function App() {
     case 'recommend':
       content = (
         <RecommendScreen
+          key={`recommend-${screen.anchorId ?? 'none'}`}
           items={items}
           apiUrl={apiUrl}
+          initialAnchorId={screen.anchorId ?? null}
           onRequestAiAccess={requestAiAccess}
           onAiUsageChanged={() => void refreshAccount()}
           outfitRemaining={account.user && account.usage
@@ -771,6 +879,12 @@ export default function App() {
           preferences={screen.preferences}
           favorites={favorites}
           warning={screen.warning}
+          initialIndex={screen.initialIndex}
+          anchorId={screen.anchorId ?? null}
+          shopping={screen.shopping ?? null}
+          initialTab={screen.initialTab}
+          extras={screen.extras}
+          poolIds={screen.poolIds ?? null}
           onToggleFavorite={toggleFavorite}
           onBack={goBack}
         />
@@ -791,11 +905,14 @@ export default function App() {
         <HistoryScreen
           items={items}
           onBack={goBack}
-          onOpenSuggestions={(suggestions, preferences) => setScreen({
+          onOpenSuggestions={(suggestions, preferences, initialIndex, shopping, initialTab) => setScreen({
             name: 'results',
             suggestions,
             preferences,
             returnTo: 'history',
+            initialIndex,
+            shopping: shopping ?? null,
+            initialTab,
           })}
         />
       );
@@ -862,6 +979,7 @@ export default function App() {
           onAdd={(category) => setScreen({ name: 'add', category })}
           onRecommend={() => setScreen({ name: 'recommend' })}
           onOpen={(item) => setScreen({ name: 'edit', item })}
+          onOutfitWith={(item) => setScreen({ name: 'recommend', anchorId: item.id })}
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onCancelDraft={cancelPendingDraft}
@@ -872,6 +990,8 @@ export default function App() {
           onStats={() => setScreen({ name: 'stats' })}
           onCalendar={() => setScreen({ name: 'calendar' })}
           onPacking={() => setScreen({ name: 'packing' })}
+          onAnalyzeIncomplete={analyzeIncompleteItems}
+          analysisRemaining={analysisRemaining}
           favoriteCount={favorites.length}
           account={account}
           onRefresh={async () => { await reloadWardrobeState(); await refreshAccount(); }}
