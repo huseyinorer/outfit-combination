@@ -21,6 +21,7 @@ import type { AccountState } from '../services/accountAuth';
 import { exportWardrobe, importWardrobe } from '../services/wardrobeExport';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
+import { trialDaysLeft } from '../domain/plan';
 import { useI18n } from '../locales';
 import {
   colors,
@@ -33,6 +34,7 @@ import {
 type ConnectionState = 'idle' | 'checking' | 'online' | 'degraded' | 'offline' | 'invalid';
 
 interface Props {
+  onShowPlans: () => void;
   apiUrl: string;
   aiConsentGranted: boolean;
   currentVersion: string;
@@ -378,19 +380,23 @@ export function SettingsScreen(props: Props) {
                     <Text style={styles.accountName}>{props.account.user.displayName}</Text>
                     <Text style={styles.accountEmail}>{props.account.user.email}</Text>
                     <View style={styles.tierRow}>
-                      <View
-                        style={[styles.tierBadge, props.account.user.tier === 'premium' && styles.tierBadgePremium]}
-                        accessibilityRole="text"
-                        accessibilityLabel={props.account.user.tier === 'premium' ? t('settings.tier.premium') : t('settings.tier.free')}
+                      <Pressable
+                        style={[styles.tierBadge, props.account.user.tier !== 'free' && styles.tierBadgePremium]}
+                        accessibilityRole="button"
+                        onPress={props.onShowPlans}
                       >
-                        <Text style={[styles.tierBadgeText, props.account.user.tier === 'premium' && styles.tierBadgeTextPremium]}>
-                          {props.account.user.tier === 'premium' ? t('settings.tier.premium') : t('settings.tier.free')}
+                        <Text style={[styles.tierBadgeText, props.account.user.tier !== 'free' && styles.tierBadgeTextPremium]}>
+                          {props.account.user.tier === 'premium'
+                            ? t('settings.tier.premium')
+                            : props.account.user.tier === 'trial'
+                              ? l(`🎁 Deneme · ${trialDaysLeft(props.account.user)} gün kaldı`, `🎁 Trial · ${trialDaysLeft(props.account.user)} days left`)
+                              : t('settings.tier.free')}
                         </Text>
-                      </View>
+                      </Pressable>
+                      <Pressable accessibilityRole="button" onPress={props.onShowPlans} hitSlop={6}>
+                        <Text style={styles.tierPerks}>{l('Planları gör ›', 'See plans ›')}</Text>
+                      </Pressable>
                     </View>
-                    {props.account.user.tier === 'premium' ? null : (
-                      <Text style={styles.tierPerks}>{t('settings.tier.premiumPerks')}</Text>
-                    )}
                   </View>
                   {props.account.usage ? (
                     <View style={styles.usageGrid}>

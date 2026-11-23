@@ -9,10 +9,27 @@ namespace OutfitCombination.Api.Services;
 public static class AccountTier
 {
     public const string Free = "free";
+    public const string Trial = "trial";
     public const string Premium = "premium";
-    public static readonly string[] Values = [Free, Premium];
+    public static readonly string[] Values = [Free, Trial, Premium];
     public static string Normalize(string? value) =>
-        string.Equals(value, Premium, StringComparison.OrdinalIgnoreCase) ? Premium : Free;
+        string.Equals(value, Premium, StringComparison.OrdinalIgnoreCase) ? Premium
+        : string.Equals(value, Trial, StringComparison.OrdinalIgnoreCase) ? Trial
+        : Free;
+
+    /// <summary>
+    /// The plan that applies right now: an active premium subscription, otherwise the trial for
+    /// the first <paramref name="trialDays"/> after sign-up, otherwise free. (Stored tier is only
+    /// free or premium; "trial" is never written to the database.)
+    /// </summary>
+    public static string Effective(AccountUser user, DateTimeOffset now, int trialDays)
+    {
+        if (user.Tier == Premium && (user.TierExpiresAt is null || user.TierExpiresAt > now)) return Premium;
+        return TrialEndsAt(user, trialDays) is { } end && now < end ? Trial : Free;
+    }
+
+    public static DateTimeOffset? TrialEndsAt(AccountUser user, int trialDays) =>
+        user.CreatedAt?.AddDays(Math.Max(0, trialDays));
 }
 
 public sealed record AccountUser(
@@ -20,7 +37,9 @@ public sealed record AccountUser(
     string Email,
     string DisplayName,
     string? PictureUrl,
-    string Tier);
+    string Tier,
+    DateTimeOffset? CreatedAt = null,
+    DateTimeOffset? TierExpiresAt = null);
 
 public sealed record OAuthAttempt(string State, Guid InstallationId);
 
@@ -381,7 +400,7 @@ public sealed class AccountStore : IAsyncDisposable
                   AND expires_at > now()
                 RETURNING user_id
             )
-            SELECT u.id, u.email, u.display_name, u.picture_url, u.tier
+            SELECT u.id, u.email, u.display_name, u.picture_url, u.tier, u.created_at, u.tier_expires_at
             FROM consumed c
             JOIN app_users u ON u.id = c.user_id;
             """);
@@ -396,7 +415,7 @@ public sealed class AccountStore : IAsyncDisposable
         if (dataSource is null) return null;
         await EnsureInitializedAsync(cancellationToken);
         await using var command = dataSource.CreateCommand("""
-            SELECT id, email, display_name, picture_url, tier
+            SELECT id, email, display_name, picture_url, tier, created_at, tier_expires_at
             FROM app_users
             WHERE id = @userId;
             """);
@@ -505,7 +524,12 @@ public sealed class AccountStore : IAsyncDisposable
         reader.GetString(1),
         reader.GetString(2),
         reader.IsDBNull(3) ? null : reader.GetString(3),
-        reader.FieldCount > 4 && !reader.IsDBNull(4) ? AccountTier.Normalize(reader.GetString(4)) : AccountTier.Free);
+        // Stored tier is free or premium only; a stray value never grants the trial.
+        reader.FieldCount > 4 && !reader.IsDBNull(4) && AccountTier.Normalize(reader.GetString(4)) == AccountTier.Premium
+            ? AccountTier.Premium
+            : AccountTier.Free,
+        reader.FieldCount > 5 && !reader.IsDBNull(5) ? reader.GetFieldValue<DateTimeOffset>(5) : null,
+        reader.FieldCount > 6 && !reader.IsDBNull(6) ? reader.GetFieldValue<DateTimeOffset>(6) : null);
 
     private static string RandomToken(int bytes) => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(bytes));
     private static byte[] Hash(string token) => SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token));
@@ -621,7 +645,7 @@ public sealed class AccountStore : IAsyncDisposable
                 display_name = CASE WHEN excluded.display_name = '' THEN app_users.display_name ELSE excluded.display_name END,
                 picture_url = COALESCE(excluded.picture_url, app_users.picture_url),
                 last_login_at = now()
-            RETURNING id, email, display_name, picture_url, tier;
+            RETURNING id, email, display_name, picture_url, tier, created_at, tier_expires_at;
             """, connection, transaction);
         command.Parameters.AddWithValue("id", userId);
         command.Parameters.AddWithValue("subject", (object?)googleSubject ?? DBNull.Value);

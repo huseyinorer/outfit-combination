@@ -291,18 +291,21 @@ public sealed class PersistentUsageQuotaService : IAsyncDisposable
 
     private (int Daily, int Monthly) Limits(AiOperation operation, string tier = AccountTier.Free)
     {
-        var baseDaily = operation == AiOperation.Analysis
-            ? Math.Clamp(options.DailyAnalysisLimit, 1, 10_000)
-            : Math.Clamp(options.DailyOutfitLimit, 1, 10_000);
-        var baseMonthly = operation == AiOperation.Analysis
-            ? Math.Clamp(options.MonthlyAnalysisLimit, baseDaily, 100_000)
-            : Math.Clamp(options.MonthlyOutfitLimit, baseDaily, 100_000);
-        var multiplier = string.Equals(tier, AccountTier.Premium, StringComparison.OrdinalIgnoreCase)
-            ? Math.Clamp(options.PremiumMultiplier, 1.0, 100.0)
-            : 1.0;
-        var daily = (int)Math.Min(1_000_000, Math.Max(baseDaily, Math.Round(baseDaily * multiplier)));
-        var monthly = (int)Math.Min(10_000_000, Math.Max(baseMonthly, Math.Round(baseMonthly * multiplier)));
-        return (daily, monthly);
+        var analysis = operation == AiOperation.Analysis;
+        var (daily, monthly) = AccountTier.Normalize(tier) switch
+        {
+            AccountTier.Premium => analysis
+                ? (options.PremiumDailyAnalysisLimit, options.PremiumMonthlyAnalysisLimit)
+                : (options.PremiumDailyOutfitLimit, options.PremiumMonthlyOutfitLimit),
+            AccountTier.Trial => analysis
+                ? (options.TrialDailyAnalysisLimit, options.TrialMonthlyAnalysisLimit)
+                : (options.TrialDailyOutfitLimit, options.TrialMonthlyOutfitLimit),
+            _ => analysis
+                ? (options.DailyAnalysisLimit, options.MonthlyAnalysisLimit)
+                : (options.DailyOutfitLimit, options.MonthlyOutfitLimit)
+        };
+        daily = Math.Clamp(daily, 1, 100_000);
+        return (daily, Math.Clamp(monthly, daily, 1_000_000));
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)

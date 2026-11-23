@@ -552,6 +552,34 @@ export async function updateClothing(item: ClothingItem): Promise<void> {
   );
 }
 
+/**
+ * Saves an item whose category changed. Outfits that used it in its old slot no longer make
+ * sense (e.g. a coat stored as the "top" of a favorite), so those are removed first; where it
+ * was an optional extra (hat/outerwear/accessory) only that piece is taken out of the outfit.
+ */
+export async function updateClothingCategory(item: ClothingItem): Promise<void> {
+  const database = await db();
+  const id = item.id;
+  await database.withTransactionAsync(async () => {
+    for (const table of ['outfit_feedback', 'worn_outfits', 'suggestion_history', 'favorite_outfits']) {
+      await database.runAsync(
+        `DELETE FROM ${table} WHERE ownerId = ? AND (topId = ? OR bottomId = ? OR shoeId = ?)`,
+        activeOwnerId, id, id, id,
+      );
+    }
+    for (const table of ['worn_outfits', 'suggestion_history', 'favorite_outfits']) {
+      await database.runAsync(`UPDATE ${table} SET hatId = NULL WHERE ownerId = ? AND hatId = ?`, activeOwnerId, id);
+      await database.runAsync(`UPDATE ${table} SET outerwearId = NULL WHERE ownerId = ? AND outerwearId = ?`, activeOwnerId, id);
+      await database.runAsync(`UPDATE ${table} SET accessoryId = NULL WHERE ownerId = ? AND accessoryId = ?`, activeOwnerId, id);
+      await database.runAsync(
+        `UPDATE ${table} SET extraAccessoryIds = NULL WHERE ownerId = ? AND extraAccessoryIds LIKE ?`,
+        activeOwnerId, `%"${id}"%`,
+      );
+    }
+  });
+  await updateClothing(item);
+}
+
 export async function removeClothing(id: string): Promise<void> {
   const database = await db();
   await database.withTransactionAsync(async () => {

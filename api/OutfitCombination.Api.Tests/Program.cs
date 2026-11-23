@@ -41,7 +41,8 @@ public static class TestRunner
             ("Alışveriş kombini şeması ve eşleme", ShoppingSchemaAndMapping),
             ("Alışveriş ürün süzgeci", ShoppingProductFilter),
             ("Ürün görseli önizlemesi", ProductPreviewParsing),
-            ("Slotlar: seçilen parçalar, aksesuarlar ve alışveriş", SlotPlanning)
+            ("Slotlar: seçilen parçalar, aksesuarlar ve alışveriş", SlotPlanning),
+            ("Plan: deneme, ücretsiz ve premium", PlanResolution)
         };
         try
         {
@@ -447,6 +448,27 @@ public static class TestRunner
         request.Slots.Shoes = new OutfitSlot { Mode = "shop" };
         request.Slots.Outerwear = new OutfitSlot { Mode = "shop" };
         Equal("shoes,outerwear", string.Join(",", OutfitRules.ShopCategories(request)));
+    }
+
+    private static void PlanResolution()
+    {
+        var now = new DateTimeOffset(2026, 12, 1, 12, 0, 0, TimeSpan.Zero);
+        var fresh = new AccountUser(Guid.NewGuid(), "a@b.c", "A", null, AccountTier.Free, now.AddDays(-3));
+        var old = fresh with { CreatedAt = now.AddDays(-20) };
+        Equal(AccountTier.Trial, AccountTier.Effective(fresh, now, 14));
+        Equal(AccountTier.Free, AccountTier.Effective(old, now, 14));
+        Equal(AccountTier.Premium, AccountTier.Effective(old with { Tier = AccountTier.Premium }, now, 14));
+        Equal(AccountTier.Free, AccountTier.Effective(old with { Tier = AccountTier.Premium, TierExpiresAt = now.AddDays(-1) }, now, 14));
+
+        var service = new PersistentUsageQuotaService(
+            Options.Create(new UsageQuotaOptions { DailyOutfitLimit = 1, MonthlyOutfitLimit = 1, TrialDailyOutfitLimit = 2, TrialMonthlyOutfitLimit = 2 }),
+            new TestHostEnvironment(),
+            NullLogger<PersistentUsageQuotaService>.Instance);
+        var subject = Guid.NewGuid().ToString();
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(subject, null, AiOperation.Outfit, AccountTier.Trial, CancellationToken.None).GetAwaiter().GetResult().Status);
+        Equal(QuotaStatus.Allowed, service.TryConsumeAsync(subject, null, AiOperation.Outfit, AccountTier.Trial, CancellationToken.None).GetAwaiter().GetResult().Status);
+        Equal(QuotaStatus.Exceeded, service.TryConsumeAsync(subject, null, AiOperation.Outfit, AccountTier.Trial, CancellationToken.None).GetAwaiter().GetResult().Status);
+        service.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private static InstallationTokenService TokenService(DateTimeOffset now) =>

@@ -40,6 +40,7 @@ import {
   softDeleteClothing,
   restoreClothing,
   updateClothing,
+  updateClothingCategory,
 } from './src/data/database';
 import { outfitKey } from './src/domain/outfitEngine';
 import { fillMissingAttributes } from './src/domain/completeness';
@@ -87,6 +88,7 @@ import { FavoritesScreen } from './src/screens/FavoritesScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { RecommendScreen } from './src/screens/RecommendScreen';
 import { ResultsScreen } from './src/screens/ResultsScreen';
+import { PlansSheet } from './src/components/PlansSheet';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
@@ -145,6 +147,7 @@ const topSystemInset = Platform.OS === 'android'
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'auth' });
   const [items, setItems] = useState<ClothingItem[]>([]);
+  const [plansOpen, setPlansOpen] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteOutfit[]>([]);
   const [pendingDraft, setPendingDraftState] = useState<ClothingDraft | null>(null);
   const [pendingQueue, setPendingQueueState] = useState<ClothingDraft[]>([]);
@@ -404,8 +407,9 @@ export default function App() {
     tactileSuccess(l('Kıyafet dolabına eklendi.', 'Clothing added to your wardrobe.'));
   };
 
-  const saveEditedItem = async (item: ClothingItem) => {
-    await updateClothing(item);
+  const saveEditedItem = async (item: ClothingItem, categoryChanged = false) => {
+    if (categoryChanged) await updateClothingCategory(item);
+    else await updateClothing(item);
     await refresh();
     tactileSuccess(l('Değişiklikler kaydedildi.', 'Changes saved.'));
     setScreen({ name: 'home' });
@@ -867,6 +871,7 @@ export default function App() {
             : undefined}
           onBack={goBack}
           onAddCategory={(category) => setScreen({ name: 'add', category })}
+          onShowPlans={() => setPlansOpen(true)}
           onResults={showNewResults}
         />
       );
@@ -942,6 +947,7 @@ export default function App() {
           onSignOut={disconnectAccount}
           onDeleteAccount={removeAccount}
           onRefreshAccount={refreshAccount}
+          onShowPlans={() => setPlansOpen(true)}
           onRefreshWardrobe={async () => { await reloadWardrobeState(); }}
           onGrantAiConsent={grantAiConsent}
           onRevokeAiConsent={revokeAiConsent}
@@ -991,6 +997,7 @@ export default function App() {
           onCalendar={() => setScreen({ name: 'calendar' })}
           onPacking={() => setScreen({ name: 'packing' })}
           onAnalyzeIncomplete={analyzeIncompleteItems}
+          onShowPlans={() => setPlansOpen(true)}
           analysisRemaining={analysisRemaining}
           favoriteCount={favorites.length}
           account={account}
@@ -1004,6 +1011,7 @@ export default function App() {
       <View key={`app-${colorScheme}-${themePreference}`} style={styles.safeArea}>
         <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
         {content}
+        <PlansSheet visible={plansOpen} user={account.user} onClose={() => setPlansOpen(false)} />
         {recentlyDeleted ? (
           <View style={styles.undoBar}>
             <Text numberOfLines={1} style={styles.undoText}>

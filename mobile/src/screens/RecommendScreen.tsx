@@ -86,6 +86,7 @@ interface Props {
   onAiUsageChanged: () => void;
   outfitRemaining?: number;
   onAddCategory: (category: Category) => void;
+  onShowPlans: () => void;
   onResults: (payload: OutfitResultsPayload) => Promise<void>;
 }
 
@@ -103,6 +104,23 @@ export function RecommendScreen(props: Props) {
   const looks = language === 'tr' ? ['Fark etmez', 'Spor', 'Rahat', 'Smart casual', 'Klasik'] : ['Any', 'Sporty', 'Relaxed', 'Smart casual', 'Classic'];
   const tones = language === 'tr' ? ['Fark etmez', 'Açık', 'Koyu', 'Karışık'] : ['Any', 'Light', 'Dark', 'Mixed'];
   const preferencesKey = `outfit_preferences_last:${language}`;
+  // Icons are only part of the label; the stored value stays the plain option text.
+  const optionIcons: Record<string, string> = {
+    'Günlük': '☀️', Daily: '☀️',
+    'İş/ofis': '💼', 'Work/office': '💼',
+    'Arkadaş buluşması': '☕', 'Meeting friends': '☕',
+    'Akşam yemeği': '🍽️', Dinner: '🍽️',
+    'Özel gün': '🎉', 'Special occasion': '🎉',
+    'Fark etmez': '🤷', Any: '🤷',
+    Spor: '🏃', Sporty: '🏃',
+    Rahat: '😌', Relaxed: '😌',
+    'Smart casual': '👔',
+    Klasik: '🎩', Classic: '🎩',
+    'Açık': '🤍', Light: '🤍',
+    Koyu: '🖤', Dark: '🖤',
+    'Karışık': '🎨', Mixed: '🎨',
+  };
+  const withIcon = (option: string) => (optionIcons[option] ? `${optionIcons[option]} ${option}` : option);
 
   const initialPiece = props.initialPieceId ? props.items.find((item) => item.id === props.initialPieceId) ?? null : null;
   const [step, setStepState] = useState<Step>(() => (initialPiece ? 'slots' : sessionDraft.step ?? 'choose'));
@@ -311,26 +329,42 @@ export function RecommendScreen(props: Props) {
       <Text style={styles.blockTitle}>{l('Nereye?', 'Where to?')}</Text>
       <View style={styles.chips}>
         {destinations.map((option) => (
-          <Chip key={option} label={option} selected={preferences.destination === option} onPress={() => setPreferences({ ...preferences, destination: option })} />
+          <Chip key={option} label={withIcon(option)} selected={preferences.destination === option} onPress={() => setPreferences({ ...preferences, destination: option })} />
         ))}
       </View>
-      <Pressable accessibilityRole="button" onPress={() => setFineTuneOpen((open) => !open)} hitSlop={6}>
-        <Text style={styles.link}>
-          {fineTuneOpen ? l('İnce ayarı gizle ⌃', 'Hide fine-tuning ⌃') : l(`İnce ayar: tarz ${preferences.look.toLocaleLowerCase('tr-TR')}, ton ${preferences.tone.toLocaleLowerCase('tr-TR')} ⌄`, `Fine-tune: style ${preferences.look.toLowerCase()}, tone ${preferences.tone.toLowerCase()} ⌄`)}
-        </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: fineTuneOpen }}
+        accessibilityLabel={l('İnce ayar: tarz ve renk tonu', 'Fine-tune: style and color tone')}
+        onPress={() => setFineTuneOpen((open) => !open)}
+        style={({ pressed }) => [styles.fineTune, fineTuneOpen && styles.fineTuneOpen, pressed && styles.pressed]}
+      >
+        <Text style={styles.fineTuneIcon}>🎚</Text>
+        <View style={styles.fineTuneCopy}>
+          <Text style={styles.fineTuneTitle}>{l('İnce ayar', 'Fine-tune')}</Text>
+          <View style={styles.fineTuneValues}>
+            <View style={[styles.fineTunePill, preferences.look !== any && styles.fineTunePillSet]}>
+              <Text style={styles.fineTunePillText}>{l('Tarz', 'Style')}: {withIcon(preferences.look)}</Text>
+            </View>
+            <View style={[styles.fineTunePill, preferences.tone !== any && styles.fineTunePillSet]}>
+              <Text style={styles.fineTunePillText}>{l('Ton', 'Tone')}: {withIcon(preferences.tone)}</Text>
+            </View>
+          </View>
+        </View>
+        <Text style={styles.fineTuneChevron}>{fineTuneOpen ? '⌃' : '⌄'}</Text>
       </Pressable>
       {fineTuneOpen ? (
         <>
           <Text style={styles.subTitle}>{l('Tarz', 'Style')}</Text>
           <View style={styles.chips}>
             {looks.map((option) => (
-              <Chip key={option} label={option} selected={preferences.look === option} onPress={() => setPreferences({ ...preferences, look: option })} />
+              <Chip key={option} label={withIcon(option)} selected={preferences.look === option} onPress={() => setPreferences({ ...preferences, look: option })} />
             ))}
           </View>
           <Text style={styles.subTitle}>{l('Renk tonu', 'Color tone')}</Text>
           <View style={styles.chips}>
             {tones.map((option) => (
-              <Chip key={option} label={option} selected={preferences.tone === option} onPress={() => setPreferences({ ...preferences, tone: option })} />
+              <Chip key={option} label={withIcon(option)} selected={preferences.tone === option} onPress={() => setPreferences({ ...preferences, tone: option })} />
             ))}
           </View>
         </>
@@ -469,10 +503,20 @@ export function RecommendScreen(props: Props) {
           ) : null}
           {error ? <Notice tone="error">{error}</Notice> : null}
           {step !== 'choose' && notEnoughCredits && props.outfitRemaining !== 0 ? (
-            <Notice tone="error">{l(`Bu istek ${aiCost} 🪙 tutuyor, kalan kredin ${props.outfitRemaining}.`, `This costs ${aiCost} 🪙 and you have ${props.outfitRemaining} left.`)}</Notice>
+            <Text style={styles.hint}>{l(`Bu istek ${aiCost} 🪙 tutuyor, kalan kredin ${props.outfitRemaining}.`, `This costs ${aiCost} 🪙 and you have ${props.outfitRemaining} left.`)}</Text>
           ) : null}
-          {step !== 'choose' && props.outfitRemaining === 0 ? (
-            <Notice tone="error">{l('AI kredin bitti. Ücretsiz Hızlı Kombin kullanılabilir.', 'Your AI credits are used up. Quick Outfits remain free.')}</Notice>
+          {step !== 'choose' && (props.outfitRemaining === 0 || notEnoughCredits) ? (
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>
+                {props.outfitRemaining === 0
+                  ? l('Bugünkü AI kredin bitti', "You're out of AI credits for today")
+                  : l('Bu istek için kredin yetmiyor', 'Not enough credits for this request')}
+              </Text>
+              <Text style={styles.hint}>
+                {l('Ücretsiz ⚡ Hızlı Kombin her zaman açık. Daha fazla AI kombin ve alışveriş önerisi için planlara göz at.', 'Free ⚡ Quick Outfits are always on. See the plans for more AI outfits and shopping suggestions.')}
+              </Text>
+              <SecondaryButton title={l('⭐ Planları gör', '⭐ See plans')} onPress={props.onShowPlans} />
+            </View>
           ) : null}
         </ContentFrame>
       </ScrollView>
@@ -576,6 +620,28 @@ const styles = StyleSheet.create({
   hint: { color: colors.muted, fontSize: 13, lineHeight: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   link: { color: colors.primary, fontSize: 13, fontWeight: '800' },
+  fineTune: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 56,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  fineTuneOpen: { borderWidth: 2 },
+  fineTuneIcon: { fontSize: 20 },
+  fineTuneCopy: { flex: 1, gap: 4 },
+  fineTuneTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  fineTuneValues: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  fineTunePill: { borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 8, paddingVertical: 2 },
+  fineTunePillSet: { borderColor: colors.primary },
+  fineTunePillText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  fineTuneChevron: { color: colors.primary, fontSize: 22, fontWeight: '900' },
   addNote: { minHeight: 44, justifyContent: 'center', borderRadius: radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, paddingHorizontal: spacing.md },
   addNoteText: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

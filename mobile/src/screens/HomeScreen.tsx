@@ -11,6 +11,7 @@ import { colors, darkPalette, lightPalette, radius, spacing } from '../theme/the
 import { useI18n } from '../locales';
 import { countWornByClothing, getSetting, setSetting } from '../data/database';
 import { isIncomplete } from '../domain/completeness';
+import { trialDaysLeft } from '../domain/plan';
 
 type Filter = 'all' | Category | 'recent' | 'summer' | 'winter' | 'incomplete';
 
@@ -33,6 +34,7 @@ interface Props {
   onCalendar: () => void;
   onPacking: () => void;
   onAnalyzeIncomplete: (items: ClothingItem[], onProgress: (done: number, total: number) => void) => Promise<void>;
+  onShowPlans: () => void;
   analysisRemaining?: number;
   favoriteCount: number;
   account: AccountState;
@@ -226,6 +228,20 @@ export function HomeScreen(props: Props) {
           )}
         </Pressable>
       </View>
+
+      {props.account.user && props.account.user.tier !== 'premium' ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={props.onShowPlans}
+          style={({ pressed }) => [styles.planPill, props.account.user?.tier === 'trial' && styles.planPillTrial, pressed && styles.pressed]}
+        >
+          <Text style={styles.planPillText}>
+            {props.account.user.tier === 'trial'
+              ? l(`🎁 Deneme: ${trialDaysLeft(props.account.user)} gün kaldı · AI kombin ve alışveriş açık`, `🎁 Trial: ${trialDaysLeft(props.account.user)} days left · AI outfits and shopping on`)
+              : l('Ücretsiz plan · günde 1 AI kombin · Premium\'u gör ›', 'Free plan · 1 AI outfit a day · See Premium ›')}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.actions}>
         <Text style={styles.prompt}>{t('home.prompt')}</Text>
@@ -548,6 +564,9 @@ const styles = StyleSheet.create({
   readinessCount: { color: colors.text, fontSize: 14, fontWeight: '800' },
   readinessText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   toolsRow: { flexDirection: 'row', gap: spacing.sm },
+  planPill: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  planPillTrial: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  planPillText: { color: colors.text, fontSize: 13, fontWeight: '800' },
   incompleteCard: {
     borderRadius: radius.md,
     borderWidth: 1,

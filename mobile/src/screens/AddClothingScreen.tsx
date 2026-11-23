@@ -21,6 +21,7 @@ import { ContentFrame, StickyFooter } from '../components/layout';
 import { Chip, Notice, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
 import { findClothingByPhotoHash, getSetting, listCorrectionRules, recordAiCorrections, setSetting } from '../data/database';
 import { applyLearnedCorrections } from '../domain/correctionLearning';
+import { missingRequiredFields, requiredLabels } from '../domain/completeness';
 import {
   CATEGORIES,
   EMPTY_ATTRIBUTES,
@@ -102,8 +103,9 @@ export function AddClothingScreen(props: Props) {
     getSetting('last_photo_source').then((value) => {
       if (value === 'gallery' || value === 'camera') setLastSource(value);
     });
+    // AI analysis is the default way to add a piece; manual entry stays available as a fallback.
     getSetting('add_analysis_mode').then((value) => {
-      if (value === 'ai' || value === 'manual') setRememberedMode(value);
+      setRememberedMode(value === 'manual' ? 'manual' : 'ai');
     });
     prepareBackgroundRemoval();
     return () => analysisRequestRef.current?.abort();
@@ -136,8 +138,9 @@ export function AddClothingScreen(props: Props) {
   };
 
   const forgetMode = async () => {
-    setRememberedMode(null);
-    await setSetting('add_analysis_mode', '');
+    const next = rememberedMode === 'ai' ? 'manual' : 'ai';
+    setRememberedMode(next);
+    await setSetting('add_analysis_mode', next);
   };
 
   // Fields whose value still equals what the AI suggested get a "✦ AI" mark in the form.
@@ -436,8 +439,10 @@ export function AddClothingScreen(props: Props) {
     await advanceQueue();
   };
 
+  const requiredMissing = draft ? missingRequiredFields(draft.attributes) : [];
+
   const save = async () => {
-    if (!draft || savingRef.current) return;
+    if (!draft || savingRef.current || requiredMissing.length > 0) return;
     savingRef.current = true;
     setBusy(true);
     try {
@@ -574,12 +579,17 @@ export function AddClothingScreen(props: Props) {
                 </Text>
               </Pressable>
             ) : null}
+            {analysisMode === 'manual' && rememberedMode === 'ai' && props.analysisRemaining === 0 ? (
+              <Notice tone="error">
+                {l('Bugünkü AI analiz hakkın doldu; bu parçanın bilgilerini elle girebilirsin. Daha fazla analiz için Ayarlar > Planlar.', "Today's AI analyses are used up; enter this piece's details manually. More analyses: Settings > Plans.")}
+              </Notice>
+            ) : null}
             {analysisMode !== 'undecided' && rememberedMode ? (
               <Pressable accessibilityRole="button" onPress={() => void forgetMode()} hitSlop={6}>
                 <Text style={styles.rememberedText}>
                   {rememberedMode === 'ai'
-                    ? l('Yeni fotoğraflar otomatik olarak AI ile analiz ediliyor · Değiştir', 'New photos are analyzed with AI automatically · Change')
-                    : l('Yeni fotoğraflarda bilgileri elle giriyorsun · Değiştir', 'You enter details manually for new photos · Change')}
+                    ? l('Yeni fotoğraflar AI ile analiz ediliyor · Elle girmeye geç', 'New photos are analyzed with AI · Switch to manual')
+                    : l('Yeni fotoğraflarda bilgileri elle giriyorsun · AI ile analize geç', 'You enter details manually · Switch to AI analysis')}
                 </Text>
               </Pressable>
             ) : null}
@@ -643,7 +653,14 @@ export function AddClothingScreen(props: Props) {
                 {analysisMode === 'undecided' ? (
                   <Notice>{l('AI ile otomatik doldurmayı veya bilgileri kendin girmeyi seç.', 'Choose AI autofill or enter the details yourself.')}</Notice>
                 ) : !analyzing ? (
+                  <>
+                  {requiredMissing.length > 0 ? (
+                    <Text style={styles.requiredNote}>
+                      {l(`Kaydetmek için doldur: ${requiredLabels(requiredMissing, 'tr')}`, `To save, fill in: ${requiredLabels(requiredMissing, 'en')}`)}
+                    </Text>
+                  ) : null}
                   <ClothingForm category={draft.category} value={draft.attributes} aiFilled={aiFilled} onChange={(attributes) => persist({ ...draft, attributes })} />
+                  </>
                 ) : (
                   <Notice>{l('Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.', 'Fields will be editable when analysis finishes, or you can continue manually now.')}</Notice>
                 )}
@@ -683,7 +700,7 @@ export function AddClothingScreen(props: Props) {
                 : t('common.save')}
               onPress={save}
               loading={busy}
-              disabled={analyzing}
+              disabled={analyzing || requiredMissing.length > 0}
               style={styles.footerButton}
             />
           ) : null}
@@ -695,6 +712,7 @@ export function AddClothingScreen(props: Props) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  requiredNote: { color: colors.danger, fontSize: 13, fontWeight: '800', marginBottom: spacing.sm },
   rememberRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 40 },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   checkboxOn: { borderColor: colors.primary, backgroundColor: colors.primary },

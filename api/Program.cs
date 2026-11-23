@@ -131,6 +131,7 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+var quotaTrialDays = app.Services.GetRequiredService<IOptions<UsageQuotaOptions>>().Value.TrialDays;
 app.UseCors("lan");
 
 app.Logger.LogInformation(
@@ -173,7 +174,8 @@ app.Use(async (context, next) =>
             {
                 context.Items[InstallationTokenService.UserContextItemKey] = userId;
                 context.Items[InstallationTokenService.ContextItemKey] = userInstallationId;
-                context.Items[InstallationTokenService.UserTierContextItemKey] = user.Tier;
+                var trialDays = context.RequestServices.GetRequiredService<IOptions<UsageQuotaOptions>>().Value.TrialDays;
+                context.Items[InstallationTokenService.UserTierContextItemKey] = AccountTier.Effective(user, DateTimeOffset.UtcNow, trialDays);
                 await next();
                 return;
             }
@@ -336,13 +338,13 @@ app.MapPost("/api/account/google/complete", async (
     if (user is null)
         return Results.BadRequest(new { message = "Oturum kodu geçersiz, kullanılmış veya süresi dolmuş." });
     var issued = tokens.IssueUser(user.Id, installationId);
-    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, user.Tier, cancellationToken);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, PlanTier(user), cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
         accessToken = issued.AccessToken,
         expiresAt = issued.ExpiresAt,
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
+        user = UserPayload(user),
         usage
     });
 }).RequireRateLimiting("account-auth");
@@ -420,13 +422,13 @@ app.MapPost("/api/account/email/complete", async (
 
     var user = await accounts.UpsertEmailUserAsync(email, cancellationToken);
     var issued = tokens.IssueUser(user.Id, installationId);
-    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, user.Tier, cancellationToken);
+    var usage = await quota.GetSnapshotAsync(user.Id.ToString(), installationId, PlanTier(user), cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
         accessToken = issued.AccessToken,
         expiresAt = issued.ExpiresAt,
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
+        user = UserPayload(user),
         usage
     });
 }).RequireRateLimiting("account-auth");
@@ -441,11 +443,11 @@ app.MapGet("/api/account/me", async (
     var userId = UserId(context);
     var user = await accounts.GetUserAsync(userId, cancellationToken);
     if (user is null) return Results.NotFound(new { message = "Kullanıcı hesabı bulunamadı." });
-    var usage = await quota.GetSnapshotAsync(userId.ToString(), InstallationId(context), user.Tier, cancellationToken);
+    var usage = await quota.GetSnapshotAsync(userId.ToString(), InstallationId(context), PlanTier(user), cancellationToken);
     response.Headers.CacheControl = "no-store";
     return Results.Ok(new
     {
-        user = new { id = user.Id, user.Email, user.DisplayName, user.PictureUrl, user.Tier },
+        user = UserPayload(user),
         usage
     });
 });
@@ -703,6 +705,21 @@ static Guid UserId(HttpContext context) =>
     context.Items[InstallationTokenService.UserContextItemKey] is Guid userId && userId != Guid.Empty
         ? userId
         : throw new InvalidOperationException("Kullanıcı oturumu doğrulanmadı.");
+
+// Trial length comes from configuration; read once at startup for the helpers below.
+string PlanTier(AccountUser user) => AccountTier.Effective(user, DateTimeOffset.UtcNow, quotaTrialDays);
+
+object UserPayload(AccountUser user) => new
+{
+    id = user.Id,
+    user.Email,
+    user.DisplayName,
+    user.PictureUrl,
+    // "tier" is the plan in effect now (free | trial | premium); older apps treat trial as free.
+    tier = PlanTier(user),
+    trialEndsAt = AccountTier.TrialEndsAt(user, quotaTrialDays),
+    premiumEndsAt = user.Tier == AccountTier.Premium ? user.TierExpiresAt : null
+};
 
 static string UserTier(HttpContext context) =>
     context.Items[InstallationTokenService.UserTierContextItemKey] is string tier

@@ -13,16 +13,17 @@ import {
 } from 'react-native';
 import { ClothingForm } from '../components/ClothingForm';
 import { ContentFrame, StickyFooter } from '../components/layout';
-import { DangerButton, Field, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
-import { detailLabels, fillMissingAttributes, missingDetails } from '../domain/completeness';
-import type { ClothingAttributes, ClothingItem } from '../domain/types';
+import { Chip, DangerButton, Field, PrimaryButton, ScreenHeader, SecondaryButton } from '../components/ui';
+import { detailLabels, fillMissingAttributes, missingDetails, missingRequiredFields, requiredLabels } from '../domain/completeness';
+import { CATEGORIES, type Category, type ClothingAttributes, type ClothingItem } from '../domain/types';
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 import { countWornByClothing } from '../data/database';
 
 export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }: {
   item: ClothingItem;
-  onSave: (item: ClothingItem) => Promise<void>;
+  /** categoryChanged: the item moved to another category (outfits using it are cleaned up). */
+  onSave: (item: ClothingItem, categoryChanged?: boolean) => Promise<void>;
   onDelete: (item: ClothingItem) => Promise<void>;
   /** Analyzes the saved photo with AI; resolves null when the user did not allow AI. */
   onAnalyze: (item: ClothingItem) => Promise<ClothingAttributes | null>;
@@ -45,12 +46,15 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
     formality: item.formality ?? '',
   });
   const [busy, setBusy] = useState(false);
+  const [category, setCategory] = useState<Category>(item.category);
+  const categoryLabel = (value: Category) =>
+    t(`category.${value}` as 'category.top' | 'category.bottom' | 'category.shoes' | 'category.hat' | 'category.accessory' | 'category.outerwear');
   const [priceText, setPriceText] = useState<string>(item.price != null ? String(item.price) : '');
   const [currency, setCurrency] = useState<string>(item.currency ?? (language === 'tr' ? 'TL' : 'USD'));
   const [wearCount, setWearCount] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisNote, setAnalysisNote] = useState<string | null>(null);
-  const missing = missingDetails({ ...attributes, category: item.category });
+  const missing = missingDetails({ ...attributes, category });
   const wide = width >= 900;
 
   const analyzeWithAi = async () => {
@@ -62,6 +66,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
       const analysis = await onAnalyze({
         ...item,
         ...attributes,
+        category,
         price: parsedPrice,
         currency: parsedPrice != null ? currency.trim() || null : null,
       });
@@ -93,21 +98,42 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
   })();
   const costPerWear = parsedPrice != null && wearCount > 0 ? parsedPrice / wearCount : null;
 
-  const save = async () => {
-    if (busy) return;
+  const persist = async () => {
     setBusy(true);
     try {
       await onSave({
         ...item,
         ...attributes,
+        category,
         price: parsedPrice,
         currency: parsedPrice != null ? currency.trim() || null : null,
         updatedAt: new Date().toISOString(),
-      });
+      }, category !== item.category);
     } catch (error) {
       Alert.alert(l('Kaydedilemedi', 'Could not save'), error instanceof Error ? error.message : t('common.unknownError'));
       setBusy(false);
     }
+  };
+
+  const requiredMissing = missingRequiredFields(attributes);
+
+  const save = async () => {
+    if (busy || requiredMissing.length > 0) return;
+    if (category === item.category) {
+      await persist();
+      return;
+    }
+    Alert.alert(
+      l('Kategori değişiyor', 'Category changes'),
+      l(
+        `Bu parça "${categoryLabel(item.category)}" yerine "${categoryLabel(category)}" olarak kaydedilecek. Onu eski yerinde kullanan favori, geçmiş ve giydiğin kombinler kaldırılacak; ekstra olarak kullanıldığı kombinlerden yalnızca bu parça çıkarılacak.`,
+        `This piece will be saved as "${categoryLabel(category)}" instead of "${categoryLabel(item.category)}". Favorite, history and worn outfits that used it in its old place will be removed; where it was an extra, only this piece is taken out.`,
+      ),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: l('Değiştir ve kaydet', 'Change and save'), onPress: () => void persist() },
+      ],
+    );
   };
 
   const remove = async () => {
@@ -178,7 +204,25 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
               </View>
             ) : null}
             {analysisNote ? <Text style={styles.analysisNote}>{analysisNote}</Text> : null}
-            <ClothingForm category={item.category} value={attributes} onChange={setAttributes} />
+            <View style={styles.categorySection}>
+              <Text style={styles.categoryTitle}>{l('Kategori', 'Category')}</Text>
+              <View style={styles.categoryChips}>
+                {CATEGORIES.map((value) => (
+                  <Chip key={value} label={categoryLabel(value)} selected={category === value} onPress={() => setCategory(value)} />
+                ))}
+              </View>
+              {category !== item.category ? (
+                <Text style={styles.categoryHint}>
+                  {l(`"${categoryLabel(item.category)}" → "${categoryLabel(category)}" olarak değiştirilecek. Kaydetmeden önce onay istenir.`, `Will change from "${categoryLabel(item.category)}" to "${categoryLabel(category)}". You'll be asked to confirm.`)}
+                </Text>
+              ) : null}
+            </View>
+            {requiredMissing.length > 0 ? (
+              <Text style={styles.requiredNote}>
+                {l(`Kaydetmek için doldur: ${requiredLabels(requiredMissing, 'tr')}`, `To save, fill in: ${requiredLabels(requiredMissing, 'en')}`)}
+              </Text>
+            ) : null}
+            <ClothingForm category={category} value={attributes} onChange={setAttributes} />
             <View style={styles.priceSection}>
               <Text style={styles.priceHeading}>{l('Fiyat ve giyim başı maliyet', 'Price and cost-per-wear')}</Text>
               <View style={styles.priceRow}>
@@ -225,7 +269,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
       </ScrollView>
       <StickyFooter>
         <DangerButton title={t('common.delete')} onPress={confirmDelete} disabled={busy} style={styles.footerDelete} />
-        <PrimaryButton title={l('Değişiklikleri kaydet', 'Save changes')} onPress={save} loading={busy} style={styles.footerSave} />
+        <PrimaryButton title={l('Değişiklikleri kaydet', 'Save changes')} onPress={save} loading={busy} disabled={requiredMissing.length > 0} style={styles.footerSave} />
       </StickyFooter>
     </KeyboardAvoidingView>
   );
@@ -247,6 +291,11 @@ const styles = StyleSheet.create({
   footerSave: { flex: 1 },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.7 },
+  requiredNote: { color: colors.danger, fontSize: 13, fontWeight: '800', marginBottom: spacing.sm },
+  categorySection: { gap: spacing.sm, marginBottom: spacing.md },
+  categoryTitle: { color: colors.text, fontSize: 14, fontWeight: '800' },
+  categoryChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  categoryHint: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   missingCard: {
     marginBottom: spacing.md,
     padding: spacing.md,

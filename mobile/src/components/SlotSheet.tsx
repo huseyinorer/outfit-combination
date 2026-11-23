@@ -44,7 +44,7 @@ export function SlotSheet({ category, slot, items, otherShopSlots, onChange, onA
       title: max > 1
         ? l(`👕 Dolabımdan seçeceğim (en fazla ${max})`, `👕 I'll choose from my wardrobe (up to ${max})`)
         : l('👕 Dolabımdan seçeceğim', "👕 I'll choose from my wardrobe"),
-      hint: l('Seçtiğin parça her öneride yer alır.', 'Your piece is in every suggestion.'),
+      hint: l('Seçtiğin parça sabit kalır, kombinler onun etrafında şekillenir.', 'Your piece stays fixed and the outfits are built around it.'),
       disabled: pool.length === 0,
     },
     {
@@ -52,7 +52,7 @@ export function SlotSheet({ category, slot, items, otherShopSlots, onChange, onA
       title: l('🛍 Alışverişte öner · +1 🪙', '🛍 Suggest from stores · +1 🪙'),
       hint: shopBlocked
         ? l(`En fazla ${MAX_SHOP_SLOTS} parça alışverişe bırakılabilir.`, `Up to ${MAX_SHOP_SLOTS} pieces can be left to shopping.`)
-        : l('AI uygun parçayı tarif eder, mağazalardaki ürünleri görselleriyle listeler.', 'AI describes the right piece and lists store products with images.'),
+        : l('Kombinine en uygun parçayı satın alman için AI sana tavsiyede bulunur; mağazalardaki ürünleri görselleriyle listeler.', 'AI recommends the piece that best completes your outfit to buy, and lists store products with images.'),
       disabled: shopBlocked,
     },
   ];

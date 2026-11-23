@@ -28,6 +28,16 @@ export function missingDetails(item: ClothingAttributes & { category: Category }
   return (FIELDS_BY_CATEGORY[item.category] ?? []).filter((field) => isEmpty(item[field]));
 }
 
+/** Fields the user must fill before saving: name, type and main color. */
+export function missingRequiredFields(item: ClothingAttributes): Array<'name' | 'subType' | 'primaryColor'> {
+  return (['name', 'subType', 'primaryColor'] as const).filter((field) => !item[field]?.trim());
+}
+
+export function requiredLabels(fields: Array<'name' | 'subType' | 'primaryColor'>, language: 'tr' | 'en'): string {
+  const labels = { name: { tr: 'ad', en: 'name' }, subType: { tr: 'tür', en: 'type' }, primaryColor: { tr: 'ana renk', en: 'main color' } };
+  return fields.map((field) => labels[field][language]).join(', ');
+}
+
 export function isIncomplete(item: ClothingAttributes & { category: Category }): boolean {
   return missingDetails(item).length > 0;
 }

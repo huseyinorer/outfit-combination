@@ -10,7 +10,7 @@ const CONFIG_TTL_MS = 5 * 60 * 1_000;
 const CONFIG_TIMEOUT_MS = 12_000;
 const REQUEST_TIMEOUT_MS = 90_000;
 
-export type AccountTier = 'free' | 'premium';
+export type AccountTier = 'free' | 'trial' | 'premium';
 
 export interface AccountUser {
   id: string;
@@ -18,10 +18,13 @@ export interface AccountUser {
   displayName: string;
   pictureUrl: string | null;
   tier: AccountTier;
+  /** End of the 14-day trial that starts at sign-up (ISO). */
+  trialEndsAt?: string | null;
+  premiumEndsAt?: string | null;
 }
 
 export function normalizeTier(value: unknown): AccountTier {
-  return value === 'premium' ? 'premium' : 'free';
+  return value === 'premium' ? 'premium' : value === 'trial' ? 'trial' : 'free';
 }
 
 export interface AccountUsage {
