@@ -93,6 +93,29 @@ public sealed class OutfitRequest
     public string? ShopCategory { get; set; }
     /// <summary>Categories the user wants to buy instead of picking from the wardrobe (shopping look).</summary>
     public List<string>? ShopCategories { get; set; } = [];
+    /// <summary>
+    /// Slot-based request (app 1.5.8+). When present it replaces AnchorId, Extras and ShopCategories.
+    /// </summary>
+    public OutfitSlots? Slots { get; set; }
+}
+
+/// <summary>What the user wants in one slot of the outfit.</summary>
+public sealed class OutfitSlot
+{
+    /// <summary>pick (user chose items) | ai (AI picks from wardrobe) | auto (AI decides whether to add) | none | shop</summary>
+    public string? Mode { get; set; }
+    /// <summary>Chosen wardrobe items for <c>pick</c>: one per slot, up to three accessories.</summary>
+    public List<string>? ItemIds { get; set; } = [];
+}
+
+public sealed class OutfitSlots
+{
+    public OutfitSlot? Top { get; set; }
+    public OutfitSlot? Bottom { get; set; }
+    public OutfitSlot? Shoes { get; set; }
+    public OutfitSlot? Outerwear { get; set; }
+    public OutfitSlot? Hat { get; set; }
+    public OutfitSlot? Accessory { get; set; }
 }
 
 public sealed class OutfitDislike
@@ -112,6 +135,8 @@ public sealed class OutfitSuggestion
     public string ShoeId { get; set; } = "";
     public string? HatId { get; set; }
     public string? AccessoryId { get; set; }
+    /// <summary>Up to three accessories; AccessoryId mirrors the first for older app versions.</summary>
+    public List<string>? AccessoryIds { get; set; }
     public string? OuterwearId { get; set; }
     public string Reason { get; set; } = "";
 }
@@ -131,7 +156,7 @@ public sealed class OutfitAiSuggestion
     public string ShoeId { get; set; } = "";
     public string? OuterwearId { get; set; }
     public string? HatId { get; set; }
-    public string? AccessoryId { get; set; }
+    public List<string>? AccessoryIds { get; set; }
     public string Title { get; set; } = "";
     public string Reason { get; set; } = "";
 }
@@ -180,7 +205,7 @@ public sealed class ShoppingAiLook
     public string? ShoeId { get; set; }
     public string? OuterwearId { get; set; }
     public string? HatId { get; set; }
-    public string? AccessoryId { get; set; }
+    public List<string>? AccessoryIds { get; set; }
     public string Title { get; set; } = "";
     public string Reason { get; set; } = "";
     public List<ShoppingAiPiece> Pieces { get; set; } = [];
@@ -206,6 +231,7 @@ public sealed class ShoppingLook
     public string? OuterwearId { get; set; }
     public string? HatId { get; set; }
     public string? AccessoryId { get; set; }
+    public List<string>? AccessoryIds { get; set; }
     public List<ShoppingPiece> Pieces { get; set; } = [];
 }
 

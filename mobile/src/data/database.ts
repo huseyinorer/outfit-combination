@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { accessoryIdsOf } from '../domain/slots';
 import type {
   ClothingAttributes,
   ClothingDraft,
@@ -84,6 +85,7 @@ export async function initializeDatabase(): Promise<void> {
       hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      extraAccessoryIds TEXT NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       createdAt TEXT NOT NULL,
@@ -136,6 +138,7 @@ export async function initializeDatabase(): Promise<void> {
       hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      extraAccessoryIds TEXT NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       destination TEXT NOT NULL,
@@ -186,6 +189,8 @@ export async function initializeDatabase(): Promise<void> {
     if (!cols.has('hatId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN hatId TEXT NULL;`);
     if (!cols.has('accessoryId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN accessoryId TEXT NULL;`);
     if (!cols.has('outerwearId')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN outerwearId TEXT NULL;`);
+    // 2nd and 3rd accessories (JSON array); accessoryId keeps the first for older app versions.
+    if (!cols.has('extraAccessoryIds')) await database.execAsync(`ALTER TABLE ${table} ADD COLUMN extraAccessoryIds TEXT NULL;`);
   }
 
   // Drop the legacy CHECK(category IN ('top','bottom','shoes')) by rebuilding the table.
@@ -275,12 +280,13 @@ const FK_REPAIR_TABLES: Record<'favorite_outfits' | 'suggestion_history', {
       hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      extraAccessoryIds TEXT NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       createdAt TEXT NOT NULL,
       UNIQUE(topId, bottomId, shoeId)
     );`,
-    columns: 'id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, createdAt',
+    columns: 'id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source, createdAt',
     indexes: `CREATE INDEX IF NOT EXISTS idx_favorite_created ON favorite_outfits(createdAt DESC);
       CREATE INDEX IF NOT EXISTS idx_favorite_owner_created ON favorite_outfits(ownerId, createdAt DESC);`,
   },
@@ -296,6 +302,7 @@ const FK_REPAIR_TABLES: Record<'favorite_outfits' | 'suggestion_history', {
       hatId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       accessoryId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
       outerwearId TEXT NULL REFERENCES clothing_items(id) ON DELETE SET NULL,
+      extraAccessoryIds TEXT NULL,
       reason TEXT NOT NULL,
       source TEXT NULL,
       destination TEXT NOT NULL,
@@ -304,7 +311,7 @@ const FK_REPAIR_TABLES: Record<'favorite_outfits' | 'suggestion_history', {
       suggestedAt TEXT NOT NULL,
       position INTEGER NOT NULL
     );`,
-    columns: 'id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, destination, look, tone, suggestedAt, position',
+    columns: 'id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source, destination, look, tone, suggestedAt, position',
     indexes: `CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_date ON suggestion_history(ownerId, suggestedAt DESC, position ASC);
       CREATE INDEX IF NOT EXISTS idx_suggestion_history_owner_batch ON suggestion_history(ownerId, batchId);`,
   },
@@ -361,6 +368,26 @@ const fromRow = (row: ClothingRow): ClothingItem => {
 };
 
 const scopedSettingKey = (key: string) => `${key}:${activeOwnerId}`;
+
+/** JSON for the 2nd/3rd accessory of a suggestion, or null when there are none. */
+const extraAccessoriesJson = (suggestion: OutfitSuggestion): string | null => {
+  const ids = accessoryIdsOf(suggestion);
+  return ids.length > 1 ? JSON.stringify(ids.slice(1)) : null;
+};
+
+/** Rebuilds accessoryIds from the stored first accessory and the extra JSON column. */
+function withAccessories<T extends OutfitSuggestion & { extraAccessoryIds?: string | null }>(row: T): Omit<T, 'extraAccessoryIds'> {
+  const { extraAccessoryIds, ...rest } = row;
+  let extra: string[] = [];
+  try {
+    const parsed = extraAccessoryIds ? JSON.parse(extraAccessoryIds) as unknown : [];
+    if (Array.isArray(parsed)) extra = parsed.filter((value): value is string => typeof value === 'string');
+  } catch {
+    extra = [];
+  }
+  const ids = [rest.accessoryId, ...extra].filter((value): value is string => Boolean(value));
+  return { ...rest, accessoryIds: ids.length > 0 ? ids : null };
+}
 
 export function activeWardrobeOwner(): string {
   return activeOwnerId;
@@ -565,7 +592,7 @@ export async function listDeletedClothing(): Promise<ClothingItem[]> {
 
 export async function listFavoriteOutfits(): Promise<FavoriteOutfit[]> {
   const database = await db();
-  return database.getAllAsync<FavoriteOutfit>(
+  const rows = await database.getAllAsync<FavoriteOutfit & { extraAccessoryIds?: string | null }>(
     `SELECT f.* FROM favorite_outfits f
      JOIN clothing_items t ON t.id = f.topId AND t.ownerId = f.ownerId AND t.deletedAt IS NULL
      JOIN clothing_items b ON b.id = f.bottomId AND b.ownerId = f.ownerId AND b.deletedAt IS NULL
@@ -574,17 +601,19 @@ export async function listFavoriteOutfits(): Promise<FavoriteOutfit[]> {
      ORDER BY f.createdAt DESC`,
     activeOwnerId,
   );
+  return rows.map(withAccessories);
 }
 
 export async function saveFavoriteOutfit(suggestion: OutfitSuggestion): Promise<void> {
   const database = await db();
   const id = `${activeOwnerId}|${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`;
   await database.runAsync(
-    `INSERT INTO favorite_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO favorite_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(topId, bottomId, shoeId) DO UPDATE SET
        title = excluded.title, reason = excluded.reason, source = excluded.source, ownerId = excluded.ownerId,
-       hatId = excluded.hatId, accessoryId = excluded.accessoryId, outerwearId = excluded.outerwearId`,
+       hatId = excluded.hatId, accessoryId = excluded.accessoryId, outerwearId = excluded.outerwearId,
+       extraAccessoryIds = excluded.extraAccessoryIds`,
     id,
     activeOwnerId,
     suggestion.title,
@@ -592,8 +621,9 @@ export async function saveFavoriteOutfit(suggestion: OutfitSuggestion): Promise<
     suggestion.bottomId,
     suggestion.shoeId,
     suggestion.hatId ?? null,
-    suggestion.accessoryId ?? null,
+    accessoryIdsOf(suggestion)[0] ?? null,
     suggestion.outerwearId ?? null,
+    extraAccessoriesJson(suggestion),
     suggestion.reason,
     suggestion.source ?? null,
     new Date().toISOString(),
@@ -797,8 +827,8 @@ export async function listDislikedOutfitKeys(): Promise<Set<string>> {
 export async function markOutfitWorn(suggestion: OutfitSuggestion, wornAt = new Date()): Promise<void> {
   const database = await db();
   await database.runAsync(
-    `INSERT INTO worn_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, wornAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO worn_outfits(id, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source, wornAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     `${activeOwnerId}|${wornAt.toISOString()}|${suggestion.topId}|${suggestion.bottomId}|${suggestion.shoeId}`,
     activeOwnerId,
     suggestion.title,
@@ -806,8 +836,9 @@ export async function markOutfitWorn(suggestion: OutfitSuggestion, wornAt = new 
     suggestion.bottomId,
     suggestion.shoeId,
     suggestion.hatId ?? null,
-    suggestion.accessoryId ?? null,
+    accessoryIdsOf(suggestion)[0] ?? null,
     suggestion.outerwearId ?? null,
+    extraAccessoriesJson(suggestion),
     suggestion.reason,
     suggestion.source ?? null,
     wornAt.toISOString(),
@@ -816,12 +847,13 @@ export async function markOutfitWorn(suggestion: OutfitSuggestion, wornAt = new 
 
 export async function listWornOutfits(limit = 30): Promise<WornOutfit[]> {
   const database = await db();
-  return database.getAllAsync<WornOutfit>(
-    `SELECT id, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source, wornAt
+  const rows = await database.getAllAsync<WornOutfit & { extraAccessoryIds?: string | null }>(
+    `SELECT id, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source, wornAt
      FROM worn_outfits WHERE ownerId = ? ORDER BY wornAt DESC LIMIT ?`,
     activeOwnerId,
     Math.max(1, Math.min(limit, 200)),
   );
+  return rows.map(withAccessories);
 }
 
 type SuggestionHistoryRow = Omit<SuggestedOutfitHistoryEntry, 'preferences'> & OutfitPreferences;
@@ -839,9 +871,9 @@ export async function saveSuggestionHistory(
     for (const [position, suggestion] of suggestions.entries()) {
       await database.runAsync(
         `INSERT INTO suggestion_history(
-          id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source,
+          id, batchId, ownerId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source,
           destination, look, tone, suggestedAt, position
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         `${batchId}|${position}`,
         batchId,
         activeOwnerId,
@@ -850,8 +882,9 @@ export async function saveSuggestionHistory(
         suggestion.bottomId,
         suggestion.shoeId,
         suggestion.hatId ?? null,
-        suggestion.accessoryId ?? null,
+        accessoryIdsOf(suggestion)[0] ?? null,
         suggestion.outerwearId ?? null,
+        extraAccessoriesJson(suggestion),
         suggestion.reason,
         suggestion.source ?? null,
         preferences.destination,
@@ -919,7 +952,7 @@ export async function listShoppingHistory(limit = 50): Promise<ShoppingHistoryEn
 export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedOutfitHistoryEntry[]> {
   const database = await db();
   const rows = await database.getAllAsync<SuggestionHistoryRow>(
-    `SELECT id, batchId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, reason, source,
+    `SELECT id, batchId, title, topId, bottomId, shoeId, hatId, accessoryId, outerwearId, extraAccessoryIds, reason, source,
        destination, look, tone, suggestedAt, position
      FROM suggestion_history
      WHERE ownerId = ? AND batchId IN (
@@ -935,9 +968,9 @@ export async function listSuggestionHistory(batchLimit = 50): Promise<SuggestedO
     Math.max(1, Math.min(batchLimit, 100)),
   );
   return rows.map(({ destination, look, tone, ...entry }) => ({
-    ...entry,
+    ...withAccessories(entry as SuggestionHistoryRow & { extraAccessoryIds?: string | null }),
     preferences: { destination, look, tone },
-  }));
+  }) as SuggestedOutfitHistoryEntry);
 }
 
 export async function countWornByClothing(): Promise<Map<string, number>> {

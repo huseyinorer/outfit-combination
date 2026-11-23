@@ -12,10 +12,13 @@ interface Props {
   shoes: ClothingItem;
   hat?: ClothingItem;
   accessory?: ClothingItem;
+  /** Up to three accessories; when given it replaces `accessory`. */
+  accessories?: ClothingItem[];
   outerwear?: ClothingItem;
   onPressItem?: (item: ClothingItem) => void;
-  onRemoveExtra?: (category: OptionalCategory) => void;
-  onSwapExtra?: (category: OptionalCategory) => void;
+  /** itemId tells which accessory was tapped when there are several. */
+  onRemoveExtra?: (category: OptionalCategory, itemId?: string) => void;
+  onSwapExtra?: (category: OptionalCategory, itemId?: string) => void;
 }
 
 type LayerKey = 'outerwear' | 'top' | 'bottom' | 'shoes';
@@ -140,7 +143,10 @@ export function OutfitPreview(props: Props) {
 
   const extras: Array<{ item: ClothingItem; category: OptionalCategory }> = [];
   if (props.hat) extras.push({ item: props.hat, category: 'hat' });
-  if (props.accessory) extras.push({ item: props.accessory, category: 'accessory' });
+  const accessories = props.accessories && props.accessories.length > 0
+    ? props.accessories
+    : props.accessory ? [props.accessory] : [];
+  for (const accessory of accessories) extras.push({ item: accessory, category: 'accessory' });
 
   return (
     <View style={styles.wrap}>
@@ -167,12 +173,12 @@ export function OutfitPreview(props: Props) {
         <View style={styles.extrasRow}>
           {extras.map((entry) => (
             <ExtraChip
-              key={entry.category}
+              key={`${entry.category}-${entry.item.id}`}
               item={entry.item}
               category={entry.category}
               onPress={props.onPressItem}
-              onRemove={props.onRemoveExtra ? () => props.onRemoveExtra!(entry.category) : undefined}
-              onSwap={props.onSwapExtra ? () => props.onSwapExtra!(entry.category) : undefined}
+              onRemove={props.onRemoveExtra ? () => props.onRemoveExtra!(entry.category, entry.item.id) : undefined}
+              onSwap={props.onSwapExtra ? () => props.onSwapExtra!(entry.category, entry.item.id) : undefined}
               iconColor={iconColor}
             />
           ))}

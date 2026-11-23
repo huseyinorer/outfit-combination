@@ -1,43 +1,24 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { ClothingAttributes } from '../domain/types';
+import type { Category, ClothingAttributes } from '../domain/types';
+import { colorOptions, fabricOptions, patternOptions, styleTagOptions, subtypeOptions, swatchFor } from '../domain/clothingOptions';
 import { colors, radius, spacing } from '../theme/theme';
+import { SelectField } from './SelectField';
 import { Chip, Field } from './ui';
 import { useI18n } from '../locales';
 
 interface Props {
   value: ClothingAttributes;
   onChange: (value: ClothingAttributes) => void;
+  /** Narrows the subtype list to the item's category. */
+  category?: Category;
   /** Fields whose current value came from the AI analysis; they get a small "✦ AI" mark. */
   aiFilled?: ReadonlySet<keyof ClothingAttributes>;
 }
 
-const list = (text: string) => text.split(',').map((x) => x.trim()).filter(Boolean);
 const same = (a: string, b: string) => a.trim().toLocaleLowerCase('tr-TR') === b.trim().toLocaleLowerCase('tr-TR');
 
-const COLORS: Array<{ tr: string; en: string; hex: string }> = [
-  { tr: 'Siyah', en: 'Black', hex: '#1d1d1f' },
-  { tr: 'Beyaz', en: 'White', hex: '#ffffff' },
-  { tr: 'Gri', en: 'Grey', hex: '#9a9a9a' },
-  { tr: 'Antrasit', en: 'Charcoal', hex: '#3b3e42' },
-  { tr: 'Lacivert', en: 'Navy', hex: '#1f2a4d' },
-  { tr: 'Mavi', en: 'Blue', hex: '#2f6fd1' },
-  { tr: 'Açık mavi', en: 'Light blue', hex: '#a9c8ef' },
-  { tr: 'Bej', en: 'Beige', hex: '#d9c6a5' },
-  { tr: 'Krem', en: 'Cream', hex: '#f1e8d2' },
-  { tr: 'Deve tüyü', en: 'Camel', hex: '#b5854b' },
-  { tr: 'Kahverengi', en: 'Brown', hex: '#6b4429' },
-  { tr: 'Haki', en: 'Khaki', hex: '#7b7a4a' },
-  { tr: 'Yeşil', en: 'Green', hex: '#2f7a4a' },
-  { tr: 'Bordo', en: 'Burgundy', hex: '#6d1f2c' },
-  { tr: 'Kırmızı', en: 'Red', hex: '#c8282d' },
-  { tr: 'Pembe', en: 'Pink', hex: '#e9a1b8' },
-  { tr: 'Sarı', en: 'Yellow', hex: '#ecc94b' },
-  { tr: 'Turuncu', en: 'Orange', hex: '#e07b2e' },
-  { tr: 'Mor', en: 'Purple', hex: '#6b3fa0' },
-];
-
-export function ClothingForm({ value, onChange, aiFilled }: Props) {
+export function ClothingForm({ value, onChange, aiFilled, category }: Props) {
   const { language } = useI18n();
   const l = (turkish: string, english: string) => language === 'tr' ? turkish : english;
   const [moreOpen, setMoreOpen] = useState(false);
@@ -66,39 +47,29 @@ export function ClothingForm({ value, onChange, aiFilled }: Props) {
     const selected = value.seasons.some((entry) => same(entry, season));
     set('seasons', selected ? value.seasons.filter((entry) => !same(entry, season)) : [...value.seasons, season]);
   };
-  const colorName = (entry: (typeof COLORS)[number]) => (language === 'tr' ? entry.tr : entry.en);
+  const lang = language === 'tr' ? 'tr' : 'en';
+  const single = (next: string | string[]) => (Array.isArray(next) ? next[0] ?? '' : next);
+  const many = (next: string | string[]) => (Array.isArray(next) ? next : next ? [next] : []);
 
   return (
     <View style={styles.container}>
       <Field label={label(l('Kısa ad', 'Short name'), 'name')} value={value.name} onChangeText={(text) => set('name', text)} placeholder={l('Lacivert çizgili gömlek', 'Navy striped shirt')} />
-      <Field label={label(l('Alt tür', 'Subtype'), 'subType')} value={value.subType} onChangeText={(text) => set('subType', text)} placeholder={l('Gömlek, chino, sneaker...', 'Shirt, chino, sneaker...')} />
+      <SelectField
+        label={label(l('Alt tür', 'Subtype'), 'subType')}
+        options={subtypeOptions(category, lang).map((entry) => ({ value: entry }))}
+        value={value.subType}
+        onChange={(next) => set('subType', single(next))}
+        placeholder={l('Gömlek, chino, sneaker…', 'Shirt, chinos, sneakers…')}
+      />
 
-      <View style={styles.group}>
-        <Text style={styles.groupLabel}>{label(l('Ana renk', 'Primary color'), 'primaryColor')}</Text>
-        <View style={styles.swatches}>
-          {COLORS.map((entry) => {
-            const selected = same(value.primaryColor, entry.tr) || same(value.primaryColor, entry.en);
-            return (
-              <Pressable
-                key={entry.en}
-                accessibilityRole="button"
-                accessibilityLabel={colorName(entry)}
-                accessibilityState={{ selected }}
-                onPress={() => set('primaryColor', selected ? '' : colorName(entry))}
-                style={[styles.swatchWrap, selected && styles.swatchWrapSelected]}
-              >
-                <View style={[styles.swatch, { backgroundColor: entry.hex }]} />
-              </Pressable>
-            );
-          })}
-        </View>
-        <Field
-          label={l('Renk adı', 'Color name')}
-          value={value.primaryColor}
-          onChangeText={(text) => set('primaryColor', text)}
-          placeholder={l('Listede yoksa yaz: ekru, adaçayı...', 'Not listed? Type it: ecru, sage...')}
-        />
-      </View>
+      <SelectField
+        label={label(l('Ana renk', 'Primary color'), 'primaryColor')}
+        options={colorOptions(lang)}
+        value={value.primaryColor}
+        onChange={(next) => set('primaryColor', single(next))}
+        placeholder={l('Renk seç', 'Choose a color')}
+        colorOf={swatchFor}
+      />
 
       <View style={styles.group}>
         <Text style={styles.groupLabel}>{label(l('Kalıp', 'Fit'), 'fit')}</Text>
@@ -141,7 +112,13 @@ export function ClothingForm({ value, onChange, aiFilled }: Props) {
         </View>
       </View>
 
-      <Field label={label(l('Kumaş', 'Fabric'), 'fabric')} value={value.fabric ?? ''} onChangeText={(text) => set('fabric', text)} placeholder={l('Pamuk, denim, yün, triko...', 'Cotton, denim, wool, knit...')} />
+      <SelectField
+        label={label(l('Kumaş', 'Fabric'), 'fabric')}
+        options={fabricOptions(lang).map((entry) => ({ value: entry }))}
+        value={value.fabric ?? ''}
+        onChange={(next) => set('fabric', single(next))}
+        placeholder={l('Pamuk, denim, yün…', 'Cotton, denim, wool…')}
+      />
 
       <Pressable
         accessibilityRole="button"
@@ -156,20 +133,31 @@ export function ClothingForm({ value, onChange, aiFilled }: Props) {
 
       {moreOpen ? (
         <>
-          <Field label={label(l('Desen', 'Pattern'), 'pattern')} value={value.pattern} onChangeText={(text) => set('pattern', text)} placeholder={l('Düz, ince çizgili...', 'Solid, pinstriped...')} />
-          <Field
-            label={label(l('İkincil renkler', 'Secondary colors'), 'secondaryColors')}
-            value={value.secondaryColors.join(', ')}
-            onChangeText={(text) => set('secondaryColors', list(text))}
-            placeholder={l('Beyaz, gri', 'White, gray')}
-            hint={l('Birden fazlaysa virgülle ayır.', 'Separate multiple values with commas.')}
+          <SelectField
+            label={label(l('Desen', 'Pattern'), 'pattern')}
+            options={patternOptions(lang).map((entry) => ({ value: entry }))}
+            value={value.pattern}
+            onChange={(next) => set('pattern', single(next))}
+            placeholder={l('Düz, çizgili, kareli…', 'Solid, striped, checked…')}
           />
-          <Field
+          <SelectField
+            label={label(l('İkincil renkler', 'Secondary colors'), 'secondaryColors')}
+            options={colorOptions(lang)}
+            value={value.secondaryColors}
+            onChange={(next) => set('secondaryColors', many(next))}
+            multiple
+            max={4}
+            placeholder={l('İsteğe bağlı', 'Optional')}
+            colorOf={swatchFor}
+          />
+          <SelectField
             label={label(l('Tarz etiketleri', 'Style tags'), 'styleTags')}
-            value={value.styleTags.join(', ')}
-            onChangeText={(text) => set('styleTags', list(text))}
-            placeholder={l('Smart casual, rahat', 'Smart casual, relaxed')}
-            hint={l('Virgülle ayır.', 'Separate with commas.')}
+            options={styleTagOptions(lang).map((entry) => ({ value: entry }))}
+            value={value.styleTags}
+            onChange={(next) => set('styleTags', many(next))}
+            multiple
+            max={5}
+            placeholder={l('Smart casual, rahat…', 'Smart casual, relaxed…')}
           />
           <Field
             label={label(l('Kısa açıklama', 'Short description'), 'description')}
@@ -189,10 +177,6 @@ const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   groupLabel: { color: colors.text, fontSize: 14, fontWeight: '800' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  swatchWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
-  swatchWrapSelected: { borderColor: colors.primary },
-  swatch: { width: 30, height: 30, borderRadius: 15, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   moreToggle: { minHeight: 44, justifyContent: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.md, backgroundColor: colors.surface },
   moreToggleText: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   pressed: { opacity: 0.7 },

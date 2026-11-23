@@ -643,7 +643,7 @@ export function AddClothingScreen(props: Props) {
                 {analysisMode === 'undecided' ? (
                   <Notice>{l('AI ile otomatik doldurmayı veya bilgileri kendin girmeyi seç.', 'Choose AI autofill or enter the details yourself.')}</Notice>
                 ) : !analyzing ? (
-                  <ClothingForm value={draft.attributes} aiFilled={aiFilled} onChange={(attributes) => persist({ ...draft, attributes })} />
+                  <ClothingForm category={draft.category} value={draft.attributes} aiFilled={aiFilled} onChange={(attributes) => persist({ ...draft, attributes })} />
                 ) : (
                   <Notice>{l('Analiz tamamlandığında alanlar burada düzenlenebilir olacak. İstersen beklemeden elle devam edebilirsin.', 'Fields will be editable when analysis finishes, or you can continue manually now.')}</Notice>
                 )}

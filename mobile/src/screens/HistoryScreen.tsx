@@ -251,6 +251,7 @@ export function HistoryScreen({ items, onBack, onOpenSuggestions }: Props) {
                   shoes={resolved.shoes}
                   hat={resolved.hat}
                   accessory={resolved.accessory}
+                  accessories={resolved.accessories}
                   outerwear={resolved.outerwear}
                 />
                 <Text style={styles.reason}>{entry.reason}</Text>

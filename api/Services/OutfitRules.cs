@@ -85,40 +85,120 @@ public static class OutfitRules
     }
 
     public const int MaxShopCategories = 3;
+    public const int MaxAccessories = 3;
 
-    /// <summary>
-    /// Valid, distinct shopping categories (old single field included), never the anchor's own
-    /// category, capped at <see cref="MaxShopCategories"/> because each one adds a web search.
-    /// </summary>
-    public static List<string> ShopCategories(OutfitRequest request)
+    /// <summary>Slot modes after normalisation.</summary>
+    public static class Modes
     {
-        var anchorCategory = Anchor(request)?.Category;
-        return (request.ShopCategories ?? [])
-            .Append(request.ShopCategory)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x!.Trim().ToLowerInvariant())
-            .Where(x => Categories.All.Contains(x) && x != anchorCategory)
-            .Distinct()
-            .OrderBy(x => Array.IndexOf(Categories.All, x))
-            .Take(MaxShopCategories)
-            .ToList();
+        public const string Pick = "pick";       // the user chose the item(s)
+        public const string Ai = "ai";           // main slot: AI picks from the wardrobe
+        public const string Shop = "shop";       // bought new (shopping look)
+        public const string Auto = "auto";       // optional slot: AI decides whether to add one
+        public const string Include = "include"; // optional slot: AI must add one (older apps)
+        public const string None = "none";       // optional slot: leave empty
     }
 
-    /// <summary>The "outfit with this item" piece, when the request names one that is in the wardrobe.</summary>
-    public static WardrobeItem? Anchor(OutfitRequest request) =>
-        string.IsNullOrWhiteSpace(request.AnchorId)
-            ? null
-            : request.Wardrobe.FirstOrDefault(x => x.Id == request.AnchorId);
+    public sealed record SlotChoice(string Mode, IReadOnlyList<WardrobeItem> Items);
 
-    /// <summary>Items usable in the given slot; a required-category anchor narrows its slot to itself.</summary>
+    /// <summary>
+    /// One normalised plan per category, from the slot request (1.5.8+) or, for older apps, from
+    /// AnchorId / Extras / ShopCategories. Unknown or invalid choices fall back to AI.
+    /// </summary>
+    public static IReadOnlyDictionary<string, SlotChoice> Plan(OutfitRequest request)
+    {
+        var byId = request.Wardrobe
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id))
+            .GroupBy(x => x.Id)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
+        var plan = new Dictionary<string, SlotChoice>(StringComparer.Ordinal);
+        var legacyShop = (request.ShopCategories ?? []).Append(request.ShopCategory)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!.Trim().ToLowerInvariant())
+            .ToHashSet();
+        var legacyAnchor = !string.IsNullOrWhiteSpace(request.AnchorId) && byId.TryGetValue(request.AnchorId, out var anchorItem)
+            ? anchorItem
+            : null;
+        var extras = request.Extras ?? new OutfitExtras();
+        var shopCount = 0;
+
+        foreach (var category in Categories.All)
+        {
+            var required = Categories.Required.Contains(category);
+            var fallback = required ? Modes.Ai : Modes.Auto;
+            string mode;
+            List<WardrobeItem> items = [];
+
+            if (request.Slots is not null)
+            {
+                var slot = category switch
+                {
+                    Categories.Top => request.Slots.Top,
+                    Categories.Bottom => request.Slots.Bottom,
+                    Categories.Shoes => request.Slots.Shoes,
+                    Categories.Outerwear => request.Slots.Outerwear,
+                    Categories.Hat => request.Slots.Hat,
+                    _ => request.Slots.Accessory
+                };
+                var raw = slot?.Mode?.Trim().ToLowerInvariant();
+                if (raw == Modes.Pick)
+                {
+                    items = (slot!.ItemIds ?? [])
+                        .Where(id => !string.IsNullOrWhiteSpace(id) && byId.TryGetValue(id, out var item) && item.Category == category)
+                        .Distinct()
+                        .Take(category == Categories.Accessory ? MaxAccessories : 1)
+                        .Select(id => byId[id])
+                        .ToList();
+                    mode = items.Count > 0 ? Modes.Pick : fallback;
+                }
+                else if (raw == Modes.Shop) mode = Modes.Shop;
+                else if (!required && raw is Modes.None or Modes.Auto or Modes.Include) mode = raw!;
+                else mode = fallback;
+            }
+            else if (legacyAnchor?.Category == category)
+            {
+                mode = Modes.Pick;
+                items = [legacyAnchor];
+            }
+            else if (legacyShop.Contains(category)) mode = Modes.Shop;
+            else if (required) mode = Modes.Ai;
+            else
+            {
+                var extra = category switch
+                {
+                    Categories.Hat => extras.Hat,
+                    Categories.Accessory => extras.Accessory,
+                    _ => extras.Outerwear
+                };
+                mode = extra?.Trim().ToLowerInvariant() switch
+                {
+                    "include" => Modes.Include,
+                    "exclude" => Modes.None,
+                    _ => Modes.Auto
+                };
+            }
+
+            if (mode == Modes.Shop && ++shopCount > MaxShopCategories) mode = fallback;
+            plan[category] = new SlotChoice(mode, items);
+        }
+        return plan;
+    }
+
+    /// <summary>Shopping categories of the plan, in category order (at most three).</summary>
+    public static List<string> ShopCategories(OutfitRequest request) =>
+        Plan(request).Where(x => x.Value.Mode == Modes.Shop).Select(x => x.Key).ToList();
+
+    /// <summary>All items the user fixed in slots.</summary>
+    public static List<WardrobeItem> Pinned(OutfitRequest request) =>
+        Plan(request).Values.Where(x => x.Mode == Modes.Pick).SelectMany(x => x.Items).ToList();
+
+    /// <summary>Items usable in the given slot; a picked slot is narrowed to the user's choice.</summary>
     public static List<WardrobeItem> Pool(OutfitRequest request, string category)
     {
-        var anchor = Anchor(request);
-        if (anchor is not null && anchor.Category == category && Categories.Required.Contains(category))
-            return [anchor];
+        var plan = Plan(request);
+        if (plan[category].Mode == Modes.Pick) return plan[category].Items.ToList();
         var pool = request.Wardrobe.Where(x => x.Category == category).ToList();
-        // A coat anchor is worn over a top, so prefer tops that are not jackets themselves.
-        if (anchor?.Category == Categories.Outerwear && category == Categories.Top)
+        // A chosen coat is worn over a top, so prefer tops that are not jackets themselves.
+        if (plan[Categories.Outerwear].Mode == Modes.Pick && category == Categories.Top)
         {
             var plain = pool.Where(x => !IsOuterLayer(x)).ToList();
             if (plain.Count > 0) return plain;
@@ -129,17 +209,16 @@ public static class OutfitRules
     public static int PossibleCount(OutfitRequest request) =>
         Pool(request, Categories.Top).Count * Pool(request, Categories.Bottom).Count * Pool(request, Categories.Shoes).Count;
 
-    private static bool ContainsAnchor(OutfitSuggestion suggestion, WardrobeItem? anchor) =>
-        anchor is null || anchor.Category switch
+    private static bool ContainsPins(OutfitSuggestion suggestion, IReadOnlyDictionary<string, SlotChoice> plan) =>
+        plan.Where(x => x.Value.Mode == Modes.Pick).All(x => x.Key switch
         {
-            Categories.Top => suggestion.TopId == anchor.Id,
-            Categories.Bottom => suggestion.BottomId == anchor.Id,
-            Categories.Shoes => suggestion.ShoeId == anchor.Id,
-            Categories.Hat => suggestion.HatId == anchor.Id,
-            Categories.Accessory => suggestion.AccessoryId == anchor.Id,
-            Categories.Outerwear => suggestion.OuterwearId == anchor.Id,
-            _ => true
-        };
+            Categories.Top => suggestion.TopId == x.Value.Items[0].Id,
+            Categories.Bottom => suggestion.BottomId == x.Value.Items[0].Id,
+            Categories.Shoes => suggestion.ShoeId == x.Value.Items[0].Id,
+            Categories.Hat => suggestion.HatId == x.Value.Items[0].Id,
+            Categories.Outerwear => suggestion.OuterwearId == x.Value.Items[0].Id,
+            _ => x.Value.Items.All(item => (suggestion.AccessoryIds ?? []).Contains(item.Id))
+        });
 
     public static IReadOnlyList<string> MissingCategories(IEnumerable<WardrobeItem> wardrobe)
     {
@@ -173,9 +252,17 @@ public static class OutfitRules
                 !byId.TryGetValue(candidate.ShoeId, out var shoes) || shoes.Category != Categories.Shoes)
                 continue;
             if (!OptionalMatches(candidate.HatId, Categories.Hat, byId) ||
-                !OptionalMatches(candidate.AccessoryId, Categories.Accessory, byId) ||
                 !OptionalMatches(candidate.OuterwearId, Categories.Outerwear, byId))
                 continue;
+            // Accessories: keep valid, distinct ones (max three); AccessoryId mirrors the first.
+            candidate.AccessoryIds = (candidate.AccessoryIds ?? [])
+                .Append(candidate.AccessoryId)
+                .Where(id => !string.IsNullOrWhiteSpace(id) && byId.TryGetValue(id, out var item) && item.Category == Categories.Accessory)
+                .Select(id => id!)
+                .Distinct()
+                .Take(MaxAccessories)
+                .ToList();
+            candidate.AccessoryId = candidate.AccessoryIds.FirstOrDefault();
 
             // A jacket-like top already is the outer layer; drop a second coat on top of it.
             if (!string.IsNullOrWhiteSpace(candidate.OuterwearId) && IsOuterLayer(top))
@@ -197,12 +284,12 @@ public static class OutfitRules
         OutfitRequest request,
         IEnumerable<OutfitSuggestion>? aiCandidates)
     {
-        var anchor = Anchor(request);
+        var plan = Plan(request);
         var possible = PossibleCount(request);
         if (possible == 0) return [];
         var target = Math.Min(3, possible);
         var valid = ValidateAi(request.Wardrobe, aiCandidates)
-            .Where(x => ContainsAnchor(x, anchor))
+            .Where(x => ContainsPins(x, plan))
             .Take(target)
             .ToList();
         var seen = valid.Select(x => Key(x.TopId, x.BottomId, x.ShoeId)).ToHashSet(StringComparer.Ordinal);
@@ -210,7 +297,6 @@ public static class OutfitRules
         var hats = request.Wardrobe.Where(x => x.Category == Categories.Hat).ToList();
         var accessories = request.Wardrobe.Where(x => x.Category == Categories.Accessory).ToList();
         var outerwear = request.Wardrobe.Where(x => x.Category == Categories.Outerwear).ToList();
-        var extras = request.Extras ?? new OutfitExtras();
         var season = NormalizeSeason(request.Context?.Season) ?? SeasonFromDate(DateTimeOffset.UtcNow);
         var avoid = (request.Avoid ?? [])
             .Where(x => x is not null)
@@ -240,18 +326,38 @@ public static class OutfitRules
                 TopId = best.Top.Id,
                 BottomId = best.Bottom.Id,
                 ShoeId = best.Shoes.Id,
-                HatId = anchor?.Category == Categories.Hat ? anchor.Id
-                    : PickExtra(hats, extras.Hat, best, request, season, valid, x => x.HatId)?.Id,
-                AccessoryId = anchor?.Category == Categories.Accessory ? anchor.Id
-                    : PickExtra(accessories, extras.Accessory, best, request, season, valid, x => x.AccessoryId)?.Id,
-                OuterwearId = anchor?.Category == Categories.Outerwear ? anchor.Id
-                    : PickExtra(outerwear, extras.Outerwear, best, request, season, valid, x => x.OuterwearId)?.Id,
+                HatId = SlotExtra(plan[Categories.Hat], hats, best, request, season, valid, x => x.HatId),
+                OuterwearId = SlotExtra(plan[Categories.Outerwear], outerwear, best, request, season, valid, x => x.OuterwearId),
+                AccessoryIds = plan[Categories.Accessory].Mode == Modes.Pick
+                    ? plan[Categories.Accessory].Items.Select(x => x.Id).ToList()
+                    : SlotExtra(plan[Categories.Accessory], accessories, best, request, season, valid, x => x.AccessoryId) is { } accessoryId
+                        ? [accessoryId]
+                        : [],
                 Reason = english
                     ? $"{Detail(best.Top, "top")}, {Detail(best.Bottom, "bottom")}, and {Detail(best.Shoes, "shoes")} create a balanced color and style combination."
                     : $"{Detail(best.Top, "Üst")}, {Detail(best.Bottom, "alt")} ve {Detail(best.Shoes, "ayakkabı")} renk ve tarz bakımından dengeli bir bütün oluşturuyor."
             });
+            valid[^1].AccessoryId = valid[^1].AccessoryIds?.FirstOrDefault();
         }
         return valid;
+    }
+
+    private static string? SlotExtra(
+        SlotChoice choice,
+        IReadOnlyList<WardrobeItem> pool,
+        Triple triple,
+        OutfitRequest request,
+        string season,
+        IReadOnlyCollection<OutfitSuggestion> selected,
+        Func<OutfitSuggestion, string?> selectedId)
+    {
+        return choice.Mode switch
+        {
+            Modes.Pick => choice.Items[0].Id,
+            Modes.None or Modes.Shop => null,
+            Modes.Include => PickExtra(pool, "include", triple, request, season, selected, selectedId)?.Id,
+            _ => PickExtra(pool, "auto", triple, request, season, selected, selectedId)?.Id
+        };
     }
 
     // Picks the best-fitting extra instead of always the first one: "auto" only adds a piece

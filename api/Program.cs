@@ -573,8 +573,6 @@ app.MapPost("/api/outfits", async (
     if (request.Wardrobe.GroupBy(x => x.Id).Any(group => group.Count() > 1))
         return Results.BadRequest(new { message = "Kıyafet ID'leri benzersiz olmalı." });
 
-    // An anchor that is not in the (possibly weather-filtered) wardrobe is simply ignored.
-    if (OutfitRules.Anchor(request) is null) request.AnchorId = null;
     var shopCategories = OutfitRules.ShopCategories(request);
 
     // A main category may be missing from the wardrobe when it is being bought (shopping look).
@@ -585,36 +583,30 @@ app.MapPost("/api/outfits", async (
     var english = request.Language.Equals("en", StringComparison.OrdinalIgnoreCase);
     var usageSubjects = UsageSubjects(context);
     var tier = UserTier(context);
-    var target = Math.Min(3, OutfitRules.PossibleCount(request));
+    // With a shopping slot the result is one combined look; otherwise up to three wardrobe outfits.
+    var shoppingMode = shopCategories.Count > 0;
+    var target = shoppingMode ? 0 : Math.Min(3, OutfitRules.PossibleCount(request));
     var wardrobeOutfits = target > 0;
     string? warning = null;
 
-    // Credits: 1 for the wardrobe outfits + 1 per shopping category (each one is its own web search).
-    if (wardrobeOutfits)
+    // Credits: 1 for the outfit + 1 per shopping slot (each one is its own web search).
+    var cost = 1 + shopCategories.Count;
+    var charged = 0;
+    QuotaDecision? lastDecision = null;
+    while (charged < cost)
     {
-        var quotaDecision = await quota.TryConsumeAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, tier, cancellationToken);
-        if (QuotaError(quotaDecision) is { } quotaError) return quotaError;
+        lastDecision = await quota.TryConsumeAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, tier, cancellationToken);
+        if (lastDecision.Status != QuotaStatus.Allowed) break;
+        charged++;
     }
-    var shoppingCharged = 0;
-    QuotaDecision? lastShoppingDecision = null;
-    foreach (var _ in shopCategories)
+    if (charged < cost)
     {
-        lastShoppingDecision = await quota.TryConsumeAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, tier, cancellationToken);
-        if (lastShoppingDecision.Status != QuotaStatus.Allowed) break;
-        shoppingCharged++;
-    }
-    if (shoppingCharged < shopCategories.Count)
-    {
-        for (var i = 0; i < shoppingCharged; i++)
+        for (var i = 0; i < charged; i++)
             await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
-        shoppingCharged = 0;
-        if (!wardrobeOutfits && lastShoppingDecision is not null && QuotaError(lastShoppingDecision) is { } shoppingQuotaError)
-            return shoppingQuotaError;
-        warning = english
-            ? "Not enough AI credits for the shopping suggestion (1 per category), so only wardrobe outfits were created."
-            : "Alışveriş önerisi için yeterli AI kredin kalmadı (kategori başına 1 🪙); yalnızca dolap kombinleri hazırlandı.";
-        shopCategories = [];
+        if (lastDecision is not null && QuotaError(lastDecision) is { } quotaError) return quotaError;
+        return Results.Json(new { code = "quota_exceeded", message = english ? "Not enough AI credits." : "Yeterli AI kredin yok." }, statusCode: StatusCodes.Status429TooManyRequests);
     }
+    var shoppingCharged = shopCategories.Count;
 
     // Shopping look runs in parallel with the wardrobe suggestions; its failure never blocks them.
     var shoppingTask = shopCategories.Count == 0
@@ -649,6 +641,8 @@ app.MapPost("/api/outfits", async (
     }
     if (wardrobeOutfits && aiFailed && !aiResponded)
         await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
+    if (!wardrobeOutfits && !shoppingMode)
+        await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
 
     var validAi = OutfitRules.ValidateAi(request.Wardrobe, collected);
     var completed = wardrobeOutfits ? OutfitRules.Complete(request, validAi) : [];
@@ -659,10 +653,10 @@ app.MapPost("/api/outfits", async (
             : "Eksik veya geçersiz akıllı öneriler yerel kurallarla tamamlandı.";
 
     var shopping = await shoppingTask;
-    if (shoppingCharged > 0 && shopping.Look is null)
+    if (shoppingMode && shopping.Look is null)
     {
-        // The shopping credits are returned when no shopping look could be delivered.
-        for (var i = 0; i < shoppingCharged; i++)
+        // Nothing was delivered: the outfit credit and the shopping credits are all returned.
+        for (var i = 0; i < shoppingCharged + 1; i++)
             await quota.RefundAsync(usageSubjects.Primary, usageSubjects.Secondary, AiOperation.Outfit, CancellationToken.None);
         var shoppingWarning = english
             ? "Shopping suggestions could not be prepared right now; their credits were refunded."

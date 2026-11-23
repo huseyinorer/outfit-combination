@@ -1,12 +1,12 @@
 import type {
   Category,
   ClothingItem,
-  OptionalCategory,
   OutfitPreferences,
   OutfitRequestExtras,
   OutfitSuggestion,
 } from './types.ts';
-import { OPTIONAL_CATEGORIES, REQUIRED_CATEGORIES } from './types.ts';
+import { REQUIRED_CATEGORIES } from './types.ts';
+import { MAX_ACCESSORIES, accessoryIdsOf, type Pins } from './slots.ts';
 
 const NORMAL_COLORS = new Set([
   'siyah',
@@ -76,19 +76,20 @@ export function validateAiSuggestions(
       !seen.has(key);
     if (!requiredOk) return false;
 
-    const optionalOk = (OPTIONAL_CATEGORIES as readonly OptionalCategory[]).every((category) => {
-      const field = `${category}Id` as 'hatId' | 'accessoryId' | 'outerwearId';
-      const id = candidate[field];
+    const optionalOk = (['hat', 'outerwear'] as const).every((category) => {
+      const id = category === 'hat' ? candidate.hatId : candidate.outerwearId;
       if (!id) return true;
       return byId.get(id)?.category === category;
-    });
+    }) && accessoryIdsOf(candidate).every((id) => byId.get(id)?.category === 'accessory');
     if (!optionalOk) return false;
 
     seen.add(key);
     return true;
   }).map((candidate) => {
     const top = byId.get(candidate.topId);
-    return candidate.outerwearId && top && isOuterLayer(top) ? { ...candidate, outerwearId: null } : candidate;
+    const accessoryIds = accessoryIdsOf(candidate);
+    const normalized = { ...candidate, accessoryIds, accessoryId: accessoryIds[0] ?? null };
+    return normalized.outerwearId && top && isOuterLayer(top) ? { ...normalized, outerwearId: null } : normalized;
   });
 }
 
@@ -161,7 +162,7 @@ function pickExtra(
 function makeLocalSuggestion(
   triple: Triple,
   english: boolean,
-  extras: { hat: ClothingItem | null; accessory: ClothingItem | null; outerwear: ClothingItem | null },
+  extras: { hat: ClothingItem | null; accessories: ClothingItem[]; outerwear: ClothingItem | null },
 ): OutfitSuggestion {
   const colors = [triple.top.primaryColor, triple.bottom.primaryColor, triple.shoes.primaryColor]
     .filter(Boolean)
@@ -169,7 +170,7 @@ function makeLocalSuggestion(
   const activeExtras: Array<{ item: ClothingItem; trLabel: string; enLabel: string }> = [];
   if (extras.hat) activeExtras.push({ item: extras.hat, trLabel: 'şapka', enLabel: 'hat' });
   if (extras.outerwear) activeExtras.push({ item: extras.outerwear, trLabel: 'mont', enLabel: 'jacket' });
-  if (extras.accessory) activeExtras.push({ item: extras.accessory, trLabel: 'aksesuar', enLabel: 'accessory' });
+  for (const accessory of extras.accessories) activeExtras.push({ item: accessory, trLabel: 'aksesuar', enLabel: 'accessory' });
 
   const baseReasonTr = `${triple.top.name || 'Üst'}, ${triple.bottom.name || 'alt'} ve ${triple.shoes.name || 'ayakkabı'} ${colors ? `${colors} tonlarıyla ` : ''}dengeli ve kullanışlı bir bütün oluşturuyor.`;
   const baseReasonEn = `${triple.top.name || 'Top'}, ${triple.bottom.name || 'bottom'}, and ${triple.shoes.name || 'shoes'} create a balanced, practical outfit${colors ? ` with ${colors} tones` : ''}.`;
@@ -189,7 +190,10 @@ function makeLocalSuggestion(
     source: 'local',
   };
   if (extras.hat) base.hatId = extras.hat.id;
-  if (extras.accessory) base.accessoryId = extras.accessory.id;
+  if (extras.accessories.length > 0) {
+    base.accessoryIds = extras.accessories.slice(0, MAX_ACCESSORIES).map((item) => item.id);
+    base.accessoryId = base.accessoryIds[0];
+  }
   if (extras.outerwear) base.outerwearId = extras.outerwear.id;
   return base;
 }
@@ -199,14 +203,17 @@ export function buildLocalSuggestions(
   preferences: OutfitPreferences,
   excludedKeys = new Set<string>(),
   extras: OutfitRequestExtras = {},
-  anchorId: string | null = null,
+  pins: Pins = {},
 ): OutfitSuggestion[] {
-  const anchor = anchorId ? items.find((item) => item.id === anchorId) ?? null : null;
-  // A required-category anchor narrows its slot to itself; an extra anchor is forced into its slot.
-  const slot = (category: Category) => anchor && anchor.category === category
-    ? [anchor]
-    : items.filter((item) => item.category === category);
-  const tops = anchor?.category === 'outerwear'
+  const pinned = (category: Category) => (pins[category] ?? [])
+    .map((id) => items.find((item) => item.id === id && item.category === category))
+    .filter((item): item is ClothingItem => Boolean(item));
+  // A slot the user filled is narrowed to their choice; extras they chose are always added.
+  const slot = (category: Category) => {
+    const chosen = pinned(category);
+    return chosen.length > 0 ? chosen.slice(0, 1) : items.filter((item) => item.category === category);
+  };
+  const tops = pinned('outerwear').length > 0
     ? (() => {
       const plain = slot('top').filter((item) => !isOuterLayer(item));
       return plain.length > 0 ? plain : slot('top');
@@ -253,11 +260,15 @@ export function buildLocalSuggestions(
   }
 
   const english = ['Any', 'Daily', 'Work/office', 'Meeting friends', 'Dinner', 'Special occasion'].includes(preferences.destination);
-  return selected.map((triple) => makeLocalSuggestion(triple, english, {
-    hat: anchor?.category === 'hat' ? anchor : pickExtra(hats, triple, preferences, extras.hat),
-    accessory: anchor?.category === 'accessory' ? anchor : pickExtra(accessories, triple, preferences, extras.accessory),
-    outerwear: anchor?.category === 'outerwear' ? anchor : pickExtra(outerwear, triple, preferences, extras.outerwear),
-  }));
+  const chosenAccessories = pinned('accessory').slice(0, MAX_ACCESSORIES);
+  return selected.map((triple) => {
+    const pickedAccessory = pickExtra(accessories, triple, preferences, extras.accessory);
+    return makeLocalSuggestion(triple, english, {
+      hat: pinned('hat')[0] ?? pickExtra(hats, triple, preferences, extras.hat),
+      accessories: chosenAccessories.length > 0 ? chosenAccessories : pickedAccessory ? [pickedAccessory] : [],
+      outerwear: pinned('outerwear')[0] ?? pickExtra(outerwear, triple, preferences, extras.outerwear),
+    });
+  });
 }
 
 export function completeSuggestions(
@@ -266,29 +277,44 @@ export function completeSuggestions(
   aiCandidates: OutfitSuggestion[] = [],
   excludedKeys = new Set<string>(),
   extras: OutfitRequestExtras = {},
-  anchorId: string | null = null,
+  pins: Pins = {},
 ): OutfitSuggestion[] {
-  const anchor = anchorId ? items.find((item) => item.id === anchorId) ?? null : null;
-  const possible = anchor && (REQUIRED_CATEGORIES as readonly Category[]).includes(anchor.category)
-    ? countPossibleOutfits(items.filter((item) => item.category !== anchor.category || item.id === anchor.id))
-    : countPossibleOutfits(items);
+  const pinnedIds = (category: Category) => (pins[category] ?? [])
+    .filter((id) => items.some((item) => item.id === id && item.category === category));
+  // Required slots the user filled count as a single option when sizing the result.
+  const narrowed = items.filter((item) => {
+    if (!(REQUIRED_CATEGORIES as readonly Category[]).includes(item.category)) return true;
+    const chosen = pinnedIds(item.category);
+    return chosen.length === 0 || item.id === chosen[0];
+  });
+  const possible = countPossibleOutfits(narrowed);
   if (possible === 0) return [];
 
-  const containsAnchor = (suggestion: OutfitSuggestion) => !anchor || [
-    suggestion.topId, suggestion.bottomId, suggestion.shoeId,
-    suggestion.hatId, suggestion.accessoryId, suggestion.outerwearId,
-  ].includes(anchor.id);
+  const containsPins = (suggestion: OutfitSuggestion) => {
+    const accessories = accessoryIdsOf(suggestion);
+    return (Object.keys(pins) as Category[]).every((category) => {
+      const chosen = pinnedIds(category);
+      if (chosen.length === 0) return true;
+      if (category === 'accessory') return chosen.every((id) => accessories.includes(id));
+      const field = category === 'top' ? suggestion.topId
+        : category === 'bottom' ? suggestion.bottomId
+          : category === 'shoes' ? suggestion.shoeId
+            : category === 'hat' ? suggestion.hatId
+              : suggestion.outerwearId;
+      return field === chosen[0];
+    });
+  };
   const target = Math.min(3, possible);
   const validAi = validateAiSuggestions(items, aiCandidates)
-    .filter(containsAnchor)
+    .filter(containsPins)
     .filter((suggestion) => !excludedKeys.has(outfitKey(suggestion)))
     .slice(0, target)
     .map((suggestion) => ({ ...suggestion, source: 'ai' as const }));
   const seen = new Set(validAi.map(outfitKey));
   const localExcluded = new Set([...excludedKeys, ...seen]);
-  let local = buildLocalSuggestions(items, preferences, localExcluded, extras, anchorId);
+  let local = buildLocalSuggestions(items, preferences, localExcluded, extras, pins);
   if (validAi.length + local.length < target && excludedKeys.size > 0) {
-    local = [...local, ...buildLocalSuggestions(items, preferences, seen, extras, anchorId)
+    local = [...local, ...buildLocalSuggestions(items, preferences, seen, extras, pins)
       .filter((suggestion) => !local.some((existing) => outfitKey(existing) === outfitKey(suggestion)))];
   }
   return [...validAi, ...local].slice(0, target);
@@ -302,6 +328,9 @@ export function resolveOutfitItems(items: ClothingItem[], suggestion: OutfitSugg
     shoes: byId.get(suggestion.shoeId),
     hat: suggestion.hatId ? byId.get(suggestion.hatId) : undefined,
     accessory: suggestion.accessoryId ? byId.get(suggestion.accessoryId) : undefined,
+    accessories: accessoryIdsOf(suggestion)
+      .map((id) => byId.get(id))
+      .filter((item): item is ClothingItem => Boolean(item)),
     outerwear: suggestion.outerwearId ? byId.get(suggestion.outerwearId) : undefined,
   };
 }

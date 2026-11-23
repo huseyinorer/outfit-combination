@@ -18,6 +18,7 @@ import { OutfitPreview } from '../components/OutfitPreview';
 import { ContentFrame, StickyFooter } from '../components/layout';
 import { Notice, ScreenHeader, SecondaryButton } from '../components/ui';
 import { buildLocalSuggestions, outfitKey, resolveOutfitItems } from '../domain/outfitEngine';
+import { accessoryIdsOf, type Pins } from '../domain/slots';
 import type {
   ClothingItem,
   FavoriteOutfit,
@@ -38,8 +39,8 @@ interface Props {
   favorites: FavoriteOutfit[];
   warning?: string;
   initialIndex?: number;
-  /** Piece the user asked to build around; "show another set" keeps it. */
-  anchorId?: string | null;
+  /** Pieces the user fixed per slot; "show another set" keeps them. */
+  pins?: Pins;
   /** Optional "complete with shopping" look shown on its own tab. */
   shopping?: ShoppingLook | null;
   initialTab?: 'wardrobe' | 'shopping';
@@ -107,12 +108,12 @@ export function ResultsScreen(props: Props) {
   const showAnotherSet = () => {
     const matchesPins = (suggestion: OutfitSuggestion) => Object.entries(pinned)
       .every(([field, id]) => !id || suggestion[field as 'topId' | 'bottomId' | 'shoeId'] === id);
-    const anchorId = props.anchorId ?? null;
+    const pins = props.pins ?? {};
     const extras = props.extras ?? {};
-    let next = buildLocalSuggestions(pool, props.preferences, seenKeys, extras, anchorId).filter(matchesPins).slice(0, 3);
+    let next = buildLocalSuggestions(pool, props.preferences, seenKeys, extras, pins).filter(matchesPins).slice(0, 3);
     let nextSeen = new Set(seenKeys);
     if (next.length === 0) {
-      next = buildLocalSuggestions(pool, props.preferences, new Set(), extras, anchorId).filter(matchesPins).slice(0, 3);
+      next = buildLocalSuggestions(pool, props.preferences, new Set(), extras, pins).filter(matchesPins).slice(0, 3);
       nextSeen = new Set<string>();
     }
     if (next.length === 0) return;
@@ -152,25 +153,31 @@ export function ResultsScreen(props: Props) {
   const extraFieldFor = (category: 'hat' | 'accessory' | 'outerwear'): 'hatId' | 'accessoryId' | 'outerwearId' =>
     category === 'hat' ? 'hatId' : category === 'accessory' ? 'accessoryId' : 'outerwearId';
 
-  const removeExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear') => {
-    const field = extraFieldFor(category);
+  const withAccessories = (suggestion: OutfitSuggestion, ids: string[]): OutfitSuggestion =>
+    ({ ...suggestion, accessoryIds: ids, accessoryId: ids[0] ?? null });
+
+  const removeExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear', itemId?: string) => {
     hapticTick('light');
-    const next = { ...suggestion, [field]: null };
+    const next = category === 'accessory'
+      ? withAccessories(suggestion, accessoryIdsOf(suggestion).filter((id) => id !== itemId))
+      : { ...suggestion, [extraFieldFor(category)]: null };
     setDisplayed((current) => current.map((shown) => shown === suggestion ? next : shown));
   };
 
-  const swapExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear') => {
+  const swapExtra = (suggestion: OutfitSuggestion, category: 'hat' | 'accessory' | 'outerwear', itemId?: string) => {
     const field = extraFieldFor(category);
-    const currentId = suggestion[field];
-    const candidates = props.items.filter((entry) => entry.category === category && entry.id !== currentId);
-    if (candidates.length === 0) {
+    const inUse = category === 'accessory' ? accessoryIdsOf(suggestion) : [suggestion[field]].filter(Boolean) as string[];
+    const currentId = category === 'accessory' ? itemId : suggestion[field];
+    const candidates = props.items.filter((entry) => entry.category === category && entry.id !== currentId && !inUse.includes(entry.id));
+    const alternative = candidates[0];
+    if (!alternative) {
       tactileSuccess(t('result.noAlternative'));
       return;
     }
-    const alternative = candidates[0];
-    if (!alternative) return;
     hapticTick('select');
-    const next = { ...suggestion, [field]: alternative.id };
+    const next = category === 'accessory'
+      ? withAccessories(suggestion, accessoryIdsOf(suggestion).map((id) => (id === itemId ? alternative.id : id)))
+      : { ...suggestion, [field]: alternative.id };
     setDisplayed((current) => current.map((shown) => shown === suggestion ? next : shown));
   };
 
@@ -267,15 +274,16 @@ export function ResultsScreen(props: Props) {
               shoes={resolved.shoes}
               hat={resolved.hat}
               accessory={resolved.accessory}
+                  accessories={resolved.accessories}
               outerwear={resolved.outerwear}
               onPressItem={(piece) => {
-                const pieces = [resolved.top, resolved.bottom, resolved.shoes, resolved.hat, resolved.accessory, resolved.outerwear]
+                const pieces = [resolved.top, resolved.bottom, resolved.shoes, resolved.hat, ...resolved.accessories, resolved.outerwear]
                   .filter((p): p is ClothingItem => Boolean(p));
                 const idx = pieces.findIndex((p) => p.id === piece.id);
                 setViewerContext({ items: pieces, initialIndex: idx >= 0 ? idx : 0 });
               }}
-              onRemoveExtra={(category) => removeExtra(item, category)}
-              onSwapExtra={(category) => swapExtra(item, category)}
+              onRemoveExtra={(category, itemId) => removeExtra(item, category, itemId)}
+              onSwapExtra={(category, itemId) => swapExtra(item, category, itemId)}
             />
             <Text style={styles.photoHint}>{t('result.enlarge')}</Text>
             <Text style={styles.reason}>{item.reason}</Text>

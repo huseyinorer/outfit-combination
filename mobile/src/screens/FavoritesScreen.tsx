@@ -42,6 +42,7 @@ export function FavoritesScreen({ items, favorites, onToggleFavorite, onBack }: 
                       shoes={resolved.shoes}
                       hat={resolved.hat}
                       accessory={resolved.accessory}
+                  accessories={resolved.accessories}
                       outerwear={resolved.outerwear}
                       onPressItem={(piece) => {
                         const pieces = [resolved.top, resolved.bottom, resolved.shoes, resolved.hat, resolved.accessory, resolved.outerwear]

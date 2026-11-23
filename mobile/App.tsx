@@ -109,8 +109,8 @@ type Screen =
   | { name: 'home' }
   | { name: 'add'; category?: Category; resume?: boolean }
   | { name: 'edit'; item: ClothingItem }
-  | { name: 'recommend'; anchorId?: string | null }
-  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history'; initialIndex?: number; anchorId?: string | null; shopping?: ShoppingLook | null; initialTab?: 'wardrobe' | 'shopping'; extras?: OutfitRequestExtras; poolIds?: string[] | null }
+  | { name: 'recommend'; pieceId?: string | null }
+  | { name: 'results'; suggestions: OutfitSuggestion[]; preferences: OutfitPreferences; warning?: string; returnTo?: 'recommend' | 'history'; initialIndex?: number; pins?: Partial<Record<Category, string[]>>; shopping?: ShoppingLook | null; initialTab?: 'wardrobe' | 'shopping'; extras?: OutfitRequestExtras; poolIds?: string[] | null }
   | { name: 'favorites' }
   | { name: 'history' }
   | { name: 'stats' }
@@ -231,7 +231,7 @@ export default function App() {
   const goBack = useCallback(() => {
     if (screen.name === 'results') {
       if (screen.returnTo === 'history') setScreen({ name: 'history' });
-      else setScreen({ name: 'recommend', anchorId: screen.anchorId ?? null });
+      else setScreen({ name: 'recommend' });
       return;
     }
     if (screen.name === 'privacy') {
@@ -492,14 +492,14 @@ export default function App() {
   };
 
   const showNewResults = async (payload: OutfitResultsPayload) => {
-    const { suggestions, warning, preferences, anchorId = null, shopping = null, extras, poolIds = null } = payload;
+    const { suggestions, warning, preferences, pins, shopping = null, extras, poolIds = null } = payload;
     try {
       const batchId = await saveSuggestionHistory(suggestions, preferences);
       if (shopping) await saveShoppingHistory(batchId, shopping, preferences);
     } catch {
       // Geçmiş kaydı başarısız olsa bile oluşturulan kombinler kullanıcıya gösterilir.
     }
-    setScreen({ name: 'results', suggestions, warning, preferences, returnTo: 'recommend', anchorId, shopping, extras, poolIds });
+    setScreen({ name: 'results', suggestions, warning, preferences, returnTo: 'recommend', pins, shopping, extras, poolIds });
   };
 
   const saveApiUrl = async (nextApiUrl: string) => {
@@ -853,10 +853,10 @@ export default function App() {
     case 'recommend':
       content = (
         <RecommendScreen
-          key={`recommend-${screen.anchorId ?? 'none'}`}
+          key={`recommend-${screen.pieceId ?? 'none'}`}
           items={items}
           apiUrl={apiUrl}
-          initialAnchorId={screen.anchorId ?? null}
+          initialPieceId={screen.pieceId ?? null}
           onRequestAiAccess={requestAiAccess}
           onAiUsageChanged={() => void refreshAccount()}
           outfitRemaining={account.user && account.usage
@@ -880,7 +880,7 @@ export default function App() {
           favorites={favorites}
           warning={screen.warning}
           initialIndex={screen.initialIndex}
-          anchorId={screen.anchorId ?? null}
+          pins={screen.pins}
           shopping={screen.shopping ?? null}
           initialTab={screen.initialTab}
           extras={screen.extras}
@@ -979,7 +979,7 @@ export default function App() {
           onAdd={(category) => setScreen({ name: 'add', category })}
           onRecommend={() => setScreen({ name: 'recommend' })}
           onOpen={(item) => setScreen({ name: 'edit', item })}
-          onOutfitWith={(item) => setScreen({ name: 'recommend', anchorId: item.id })}
+          onOutfitWith={(item) => setScreen({ name: 'recommend', pieceId: item.id })}
           onDelete={deleteItem}
           onResumeDraft={() => setScreen({ name: 'add', resume: true })}
           onCancelDraft={cancelPendingDraft}

@@ -15,6 +15,7 @@ import type {
   ShoppingLook,
 } from '../domain/types';
 import { accountAuthenticatedFetch } from './accountAuth';
+import type { OutfitSlotsState } from '../domain/slots';
 import type { AppLanguage } from '../locales';
 
 interface AnalyzeResponse extends ClothingAttributes {
@@ -142,6 +143,8 @@ export async function requestOutfits(
     note?: string;
     disliked?: OutfitDislike[];
     shopCategories?: Category[];
+    /** Slot setup (app 1.5.8+); replaces anchorId/shopCategories on the server. */
+    slots?: OutfitSlotsState;
     signal?: AbortSignal;
   } = {},
 ): Promise<OutfitResult> {
@@ -171,6 +174,7 @@ export async function requestOutfits(
         note: options.note?.trim().slice(0, 300) || null,
         disliked: (options.disliked ?? []).slice(0, 100),
         shopCategories: (options.shopCategories ?? []).slice(0, 3),
+        slots: options.slots ?? null,
       }),
     }, controller.signal, language);
     if (!response.ok) throw new Error(await readError(response, language));

@@ -186,11 +186,23 @@ test('sabit parça her yerel ve AI önerisinde yer alır', () => {
     item('b1', 'bottom'), item('b2', 'bottom'),
     item('s1', 'shoes'), item('h1', 'hat'),
   ];
-  const local = completeSuggestions(wardrobe, preferences, [], new Set(), {}, 'b2');
+  const local = completeSuggestions(wardrobe, preferences, [], new Set(), {}, { bottom: ['b2'] });
   assert.equal(local.length, 3);
   assert.ok(local.every((suggestion) => suggestion.bottomId === 'b2'));
 
   const ai = [{ title: 'x', topId: 't1', bottomId: 'b1', shoeId: 's1', reason: 'y' }];
-  const withHat = completeSuggestions(wardrobe, preferences, ai, new Set(), { hat: 'exclude' }, 'h1');
+  const withHat = completeSuggestions(wardrobe, preferences, ai, new Set(), { hat: 'exclude' }, { hat: ['h1'] });
   assert.ok(withHat.every((suggestion) => suggestion.hatId === 'h1'));
+});
+
+test('seçilen aksesuarlar (en fazla 3) her öneride yer alır', () => {
+  const wardrobe = [
+    item('t1', 'top'), item('t2', 'top'), item('b1', 'bottom'), item('s1', 'shoes'),
+    item('a1', 'accessory'), item('a2', 'accessory'), item('a3', 'accessory'), item('a4', 'accessory'),
+  ];
+  const result = completeSuggestions(wardrobe, preferences, [], new Set(), {}, { top: ['t2'], accessory: ['a1', 'a2', 'a3', 'a4'] });
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.topId, 't2');
+  assert.deepEqual(result[0]?.accessoryIds, ['a1', 'a2', 'a3']);
+  assert.equal(result[0]?.accessoryId, 'a1');
 });

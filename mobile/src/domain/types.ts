@@ -69,6 +69,8 @@ export interface OutfitSuggestion {
   shoeId: string;
   hatId?: string | null;
   accessoryId?: string | null;
+  /** Up to three accessories; accessoryId mirrors the first one. */
+  accessoryIds?: string[] | null;
   outerwearId?: string | null;
   reason: string;
   source?: 'ai' | 'local';
@@ -125,7 +127,8 @@ export interface OutfitResultsPayload {
   suggestions: OutfitSuggestion[];
   warning?: string;
   preferences: OutfitPreferences;
-  anchorId?: string | null;
+  /** Pieces the user fixed per slot; "show another set" keeps them. */
+  pins?: Partial<Record<Category, string[]>>;
   shopping?: ShoppingLook | null;
   extras?: OutfitRequestExtras;
   /** IDs of the pieces the request could use (weather filter); null means the whole wardrobe. */
@@ -151,6 +154,7 @@ export interface ShoppingLook {
   outerwearId?: string | null;
   hatId?: string | null;
   accessoryId?: string | null;
+  accessoryIds?: string[] | null;
   pieces: ShoppingPiece[];
 }
 

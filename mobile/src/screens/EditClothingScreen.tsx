@@ -178,7 +178,7 @@ export function EditClothingScreen({ item, onSave, onDelete, onAnalyze, onBack }
               </View>
             ) : null}
             {analysisNote ? <Text style={styles.analysisNote}>{analysisNote}</Text> : null}
-            <ClothingForm value={attributes} onChange={setAttributes} />
+            <ClothingForm category={item.category} value={attributes} onChange={setAttributes} />
             <View style={styles.priceSection}>
               <Text style={styles.priceHeading}>{l('Fiyat ve giyim başı maliyet', 'Price and cost-per-wear')}</Text>
               <View style={styles.priceRow}>

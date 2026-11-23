@@ -40,7 +40,8 @@ public static class TestRunner
             ("Not ve beğenmeme sebebi isteme girer", NoteAndDislikeInPrompt),
             ("Alışveriş kombini şeması ve eşleme", ShoppingSchemaAndMapping),
             ("Alışveriş ürün süzgeci", ShoppingProductFilter),
-            ("Ürün görseli önizlemesi", ProductPreviewParsing)
+            ("Ürün görseli önizlemesi", ProductPreviewParsing),
+            ("Slotlar: seçilen parçalar, aksesuarlar ve alışveriş", SlotPlanning)
         };
         try
         {
@@ -334,7 +335,7 @@ public static class TestRunner
         Equal(true, result.All(x => x.BottomId == "b2"));
 
         var catalog = OutfitPrompt.Build(request, [], false, DateTimeOffset.UtcNow);
-        Equal(true, catalog.Prompt.Contains("MUST INCLUDE in every outfit: B2"));
+        Equal(true, catalog.Prompt.Contains("MUST INCLUDE in every outfit (chosen by the user): B2"));
         Equal(true, System.Text.Json.JsonSerializer.Serialize(catalog.Schema()).Contains("\"bottomId\":{\"type\":\"string\",\"enum\":[\"B2\"]}"));
     }
 
@@ -411,6 +412,41 @@ public static class TestRunner
         Equal(false, ProductPreviewService.IsPublic(System.Net.IPAddress.Parse("127.0.0.1")));
         Equal(false, ProductPreviewService.IsPublic(System.Net.IPAddress.Parse("169.254.169.254")));
         Equal(true, ProductPreviewService.IsPublic(System.Net.IPAddress.Parse("151.101.1.69")));
+    }
+
+    private static void SlotPlanning()
+    {
+        var request = Request(
+            Item("t1", Categories.Top), Item("t2", Categories.Top),
+            Item("b1", Categories.Bottom), Item("b2", Categories.Bottom),
+            Item("s1", Categories.Shoes),
+            Item("a1", Categories.Accessory), Item("a2", Categories.Accessory), Item("a3", Categories.Accessory), Item("a4", Categories.Accessory),
+            Item("h1", Categories.Hat));
+        request.Slots = new OutfitSlots
+        {
+            Top = new OutfitSlot { Mode = "pick", ItemIds = ["t2"] },
+            Bottom = new OutfitSlot { Mode = "pick", ItemIds = ["t1"] }, // wrong category -> AI
+            Accessory = new OutfitSlot { Mode = "pick", ItemIds = ["a1", "a2", "a3", "a4"] },
+            Hat = new OutfitSlot { Mode = "none" }
+        };
+        var plan = OutfitRules.Plan(request);
+        Equal("pick", plan[Categories.Top].Mode);
+        Equal("ai", plan[Categories.Bottom].Mode);
+        Equal(3, plan[Categories.Accessory].Items.Count);
+
+        var result = OutfitRules.Complete(request, []);
+        Equal(2, result.Count);
+        Equal(true, result.All(x => x.TopId == "t2" && x.HatId is null));
+        Equal("a1,a2,a3", string.Join(",", result[0].AccessoryIds!));
+        Equal("a1", result[0].AccessoryId);
+
+        var catalog = OutfitPrompt.Build(request, [], false, DateTimeOffset.UtcNow);
+        var mapped = catalog.ToSuggestion(new OutfitAiSuggestion { TopId = "T2", BottomId = "B1", ShoeId = "S1", AccessoryIds = ["A4"] });
+        Equal("a1,a2,a3", string.Join(",", mapped!.AccessoryIds!)); // the user's accessories win
+
+        request.Slots.Shoes = new OutfitSlot { Mode = "shop" };
+        request.Slots.Outerwear = new OutfitSlot { Mode = "shop" };
+        Equal("shoes,outerwear", string.Join(",", OutfitRules.ShopCategories(request)));
     }
 
     private static InstallationTokenService TokenService(DateTimeOffset now) =>

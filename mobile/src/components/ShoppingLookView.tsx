@@ -4,6 +4,7 @@ import type { Category, ClothingItem, ShoppingLook, ShoppingProduct } from '../d
 import { colors, radius, spacing } from '../theme/theme';
 import { useI18n } from '../locales';
 import { Notice } from './ui';
+import { accessoryIdsOf } from '../domain/slots';
 
 const SLOT_ORDER: Category[] = ['outerwear', 'top', 'bottom', 'shoes', 'hat', 'accessory'];
 const SLOT_FIELD: Record<Category, 'topId' | 'bottomId' | 'shoeId' | 'outerwearId' | 'hatId' | 'accessoryId'> = {
@@ -45,18 +46,20 @@ export function ShoppingLookView({ look, items }: { look: ShoppingLook; items: C
     }
   };
 
-  type BoardTile = { key: Category; kind: 'buy' | 'own'; category: Category; label: string; image: string | null };
+  type BoardTile = { key: string; kind: 'buy' | 'own'; category: Category; label: string; image: string | null };
   const board = SLOT_ORDER.flatMap<BoardTile>((category) => {
     const piece = look.pieces.find((entry) => entry.category === category);
     if (piece) {
       const product = piece.products.find((entry) => entry.url === chosen[category]);
       return [{ key: category, kind: 'buy' as const, category, label: product?.name ?? piece.idealItem.name, image: product?.imageUrl || null }];
     }
-    const id = look[SLOT_FIELD[category]];
-    const item = id ? byId.get(id) : undefined;
-    return item
-      ? [{ key: category, kind: 'own' as const, category, label: item.name || categoryLabel(category), image: item.thumbnailUri ?? item.photoUri }]
-      : [];
+    const ids = category === 'accessory'
+      ? accessoryIdsOf(look)
+      : [look[SLOT_FIELD[category]]].filter((value): value is string => Boolean(value));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((item): item is ClothingItem => Boolean(item))
+      .map((item) => ({ key: `${category}-${item.id}`, kind: 'own' as const, category, label: item.name || categoryLabel(category), image: item.thumbnailUri ?? item.photoUri }));
   });
 
   const productRow = (category: Category, product: ShoppingProduct) => {
